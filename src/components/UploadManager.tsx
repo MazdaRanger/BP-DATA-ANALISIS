@@ -15,6 +15,27 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [dbStatus, setDbStatus] = useState<{
+    connected: boolean;
+    errorType: string | null;
+    message: string;
+    details?: any;
+  } | null>(null);
+
+  React.useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const res = await fetch("/api/database-status");
+        if (res.ok) {
+          const status = await res.json();
+          setDbStatus(status);
+        }
+      } catch (e) {
+        console.error("Gagal memeriksa status database", e);
+      }
+    };
+    checkStatus();
+  }, [currentCount]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -207,25 +228,45 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
         </div>
       </div>
       
-      {/* Current DB Snapshot Banner */}
-      <div className="bg-[#1a1a1a] border border-[#262626] p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
+      {/* Current DB Snapshot Banner / Connection Status */}
+      <div className={`p-5 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-5 transition ${
+        dbStatus?.connected 
+          ? "bg-[#101410]/80 border-emerald-500/20" 
+          : dbStatus?.errorType === "TABLE_MISSING"
+          ? "bg-[#18110a]/80 border-amber-500/20"
+          : "bg-[#160c0c]/80 border-red-500/20"
+      }`}>
+        <div className="space-y-1.5 max-w-xl">
           <h4 className="text-sm font-bold text-white flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Sistem Database Aktif
+            {dbStatus?.connected ? (
+              <><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Database Live Supabase Aktif</>
+            ) : dbStatus?.errorType === "TABLE_MISSING" ? (
+              <><AlertTriangle className="w-4 h-4 text-amber-400" /> Sinkronisasi Supabase Tertunda</>
+            ) : (
+              <><AlertTriangle className="w-4 h-4 text-red-400" /> Mode Memori Lokal Aktif</>
+            )}
           </h4>
-          <p className="text-[10px] text-gray-400 font-mono mt-1">Status memori SPK yang tertanam pada runtime dashboard.</p>
+          <p className="text-[10px] leading-relaxed text-gray-400 font-mono">
+            {dbStatus?.connected
+              ? "Sistem sinkronisasi dua arah dengan Supabase cloud aktif. Semua data tersimpan aman secara durable."
+              : dbStatus?.errorType === "TABLE_MISSING"
+              ? "Tabel database belum terdeteksi. Silakan salin & paste isi file 'supabase-schema.sql' ke dalam SQL Editor Supabase Anda agar sinkron secara permanen. Sementara, data akan disimpan di memori lokal."
+              : "Supabase cloud sedang offline atau tidak terhubung. Dashboard saat ini otomatis berjalan menggunakan penyimpanan memori terisolasi (Memory Sandbox)."}
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="px-3 py-1.5 rounded bg-[#111111] border border-[#222] flex items-center gap-2">
-            <span className="text-xs text-gray-500">Record Loaded:</span>
-            <span className="text-xs font-bold text-emerald-400">{currentCount} SPK</span>
+        
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="px-3 py-1.5 rounded bg-[#111111]/90 border border-[#222] flex items-center gap-2">
+            <span className="text-[10px] text-gray-500 font-mono">Records Terbaca:</span>
+            <span className="text-xs font-bold text-indigo-400 font-mono">{currentCount} SPK</span>
           </div>
+          
           <button
             onClick={onReset}
             type="button"
-            className="px-3 py-1.5 rounded bg-red-950/20 border border-red-500/20 hover:bg-red-950/40 text-red-400 transition text-xs flex items-center gap-2"
+            className="px-3 py-1.5 rounded bg-amber-950/20 border border-amber-500/20 hover:bg-amber-950/40 text-amber-400 transition text-[11px] font-bold flex items-center gap-1.5"
           >
-            <RefreshCw className="w-3.5 h-3.5" /> Reset Default Seed
+            <RefreshCw className="w-3.5 h-3.5" /> Muat Ulang Demo Seed
           </button>
         </div>
       </div>

@@ -32,6 +32,18 @@ if (supabaseUrl && supabaseAnonKey) {
   }
 }
 
+// Clean logger for Supabase errors to provide precise diagnostics
+function logSupabaseError(context: string, error: any) {
+  if (error) {
+    console.error(`[Supabase Error] ${context} failed: ${JSON.stringify({
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })}`);
+  }
+}
+
 // Convert Supabase DB snake_case record to frontend camelCase type
 function toModel(dbRow: any): BodyRepairRecord {
   return {
@@ -53,9 +65,7 @@ function toModel(dbRow: any): BodyRepairRecord {
 // Convert frontend camelCase type to Supabase DB snake_case insert payload
 function toDb(model: Partial<BodyRepairRecord>): any {
   const db: any = {};
-  if (model.id && !model.id.startsWith("INV-") && !model.id.startsWith("INV-UPL-") && !model.id.startsWith("SPK-UPL-")) {
-    db.id = model.id;
-  }
+  // Exclude primary key id so Supabase always generates standard UUIDs seamlessly
   db.tanggal = model.tanggal;
   db.week = model.week;
   db.no_spk = model.noSpk;
@@ -181,6 +191,52 @@ function generateSeedData(): BodyRepairRecord[] {
 recordsDatabase = [];
 
 // API REST 
+app.get("/api/database-status", async (req, res) => {
+  if (!supabase) {
+    return res.json({
+      connected: false,
+      errorType: "NOT_INITIALIZED",
+      message: "Supabase client not initialized. Check your environment variables."
+    });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("body_repair_records")
+      .select("id")
+      .limit(1);
+
+    if (error) {
+      if (error.message && error.message.includes("does not exist")) {
+        return res.json({
+          connected: false,
+          errorType: "TABLE_MISSING",
+          message: "Tabel 'body_repair_records' belum dibuat di Supabase Anda atau relasi tidak ditemukan. Pastikan Anda sudah menjalankan script 'supabase-schema.sql'.",
+          details: error.message
+        });
+      }
+      return res.json({
+        connected: false,
+        errorType: "SUPABASE_ERROR",
+        message: `Terjadi kendala pada koneksi Supabase: ${error.message}`,
+        details: error
+      });
+    }
+
+    return res.json({
+      connected: true,
+      errorType: null,
+      message: "Koneksi live Supabase sinkron dan aktif!",
+    });
+  } catch (e: any) {
+    return res.json({
+      connected: false,
+      errorType: "SERVER_EXCEPTION",
+      message: `Gagal memverifikasi status database: ${e.message || e}`,
+    });
+  }
+});
+
 app.get("/api/records", async (req, res) => {
   if (supabase) {
     try {
@@ -194,7 +250,7 @@ app.get("/api/records", async (req, res) => {
         recordsDatabase = records;
         return res.json(records);
       } else if (error) {
-        console.error("Supabase select error:", error);
+        logSupabaseError("GET /api/records select", error);
       }
     } catch (e) {
       console.error("Failed to fetch records from Supabase:", e);
@@ -259,7 +315,7 @@ app.post("/api/records/bulk", async (req, res) => {
         .delete()
         .neq("no_spk", "");
       if (deleteError) {
-        console.error("Failed to clear Supabase before bulk upload:", deleteError);
+        logSupabaseError("Bulk upload clear step", deleteError);
       }
 
       // Bulk insert in chunks of 50 to avoid size limitations
@@ -269,10 +325,10 @@ app.post("/api/records/bulk", async (req, res) => {
         const chunk = dbPayload.slice(i, i + chunkSize);
         const { error: insertError } = await supabase
           .from("body_repair_records")
-          .insert(chunk);
+          .upsert(chunk, { onConflict: "no_spk" });
         
         if (insertError) {
-          console.error("Error inserting bulk chunk to Supabase:", insertError);
+          logSupabaseError("Bulk upload insert step", insertError);
           throw insertError;
         }
       }
@@ -302,7 +358,7 @@ app.post("/api/records/reset", async (req, res) => {
         .delete()
         .neq("no_spk", "");
       if (deleteError) {
-        console.error("Error deleting old seeds in Supabase:", deleteError);
+        logSupabaseError("Reset clear step", deleteError);
       }
 
       // Insert new seed rows in chunks
@@ -312,9 +368,12 @@ app.post("/api/records/reset", async (req, res) => {
         const chunk = dbPayload.slice(i, i + chunkSize);
         const { error: insertError } = await supabase
           .from("body_repair_records")
-          .insert(chunk);
+          .upsert(chunk, { onConflict: "no_spk" });
         
-        if (insertError) throw insertError;
+        if (insertError) {
+          logSupabaseError("Reset insert step", insertError);
+          throw insertError;
+        }
       }
       recordsDatabase = seeds;
       return res.json({ message: "Database reset to professional seed data in Supabase & memory", recordCount: seeds.length, records: seeds });
@@ -333,7 +392,10 @@ app.post("/api/records/clear", async (req, res) => {
         .from("body_repair_records")
         .delete()
         .neq("no_spk", "");
-      if (error) throw error;
+      if (error) {
+        logSupabaseError("Clear database", error);
+        throw error;
+      }
       recordsDatabase = [];
       return res.json({ message: "Supabase database cleared successfully", recordCount: 0, records: [] });
     } catch (e) {
@@ -364,14 +426,93 @@ app.post("/api/settings", (req, res) => {
   res.json({ message: "Settings updated", settings: appSettings });
 });
 
+// Semantic Heuristic Helper for Column Mapping fallback when AI is unavailable/fails
+function fallbackMapper(sampleData: any[]): any {
+  const result: any = {
+    tanggalKey: "",
+    noSpkKey: "",
+    asuransiKey: "",
+    jasaNettKey: "",
+    partMaterialNettKey: "",
+    expensesBahanKey: "",
+    hppPartMaterialKey: "",
+    spklKey: "",
+    jumlahPanelKey: "",
+    wilayahKey: "",
+    dateFormat: "MM/DD/YYYY"
+  };
+
+  if (!Array.isArray(sampleData) || sampleData.length === 0) {
+    return result;
+  }
+
+  const sampleObj = sampleData[0] || {};
+  const keys = Object.keys(sampleObj);
+
+  const findKey = (synonyms: string[]): string => {
+    // 1. Exact match (case insensitive, trimmed)
+    for (const key of keys) {
+      const normalized = key.toLowerCase().trim();
+      if (synonyms.some(s => normalized === s.toLowerCase())) {
+        return key;
+      }
+    }
+    // 2. Partial match
+    for (const key of keys) {
+      const normalized = key.toLowerCase().trim();
+      if (synonyms.some(s => normalized.includes(s.toLowerCase()) || s.toLowerCase().includes(normalized))) {
+        return key;
+      }
+    }
+    return "";
+  };
+
+  result.tanggalKey = findKey(["tanggal", "tgl", "date", "hari", "period", "sejak", "waktu", "tgl_spk"]);
+  result.noSpkKey = findKey(["no spk", "nospk", "no_spk", "spk", "no. spk", "nomor spk", "invoice", "no_invoice", "no. spk/surat jalan", "id"]);
+  result.asuransiKey = findKey(["asuransi", "customer", "pelanggan", "insurance", "pembayar", "debtor", "nama asuransi", "premi", "penanggung", "asuransi/umum/personal"]);
+  result.jasaNettKey = findKey(["jasa nett", "jasa_nett", "jasa nett", "jasa", "net jasa", "fee", "jasa net", "revenue jasa", "nilai jasa"]);
+  result.partMaterialNettKey = findKey(["part material nett", "part_material_nett", "part material", "sparepart", "part", "suku cadang", "barang", "part nett", "spareparts value", "nilai part"]);
+  result.expensesBahanKey = findKey(["expenses bahan", "expenses_bahan", "biaya bahan", "bahan", "material", "cat", "paint expenses", "pengeluaran bahan", "biaya cat"]);
+  result.hppPartMaterialKey = findKey(["hpp part material", "hpp_part_material", "hpp part", "hpp sparepart", "hpp", "cogs part", "hpp suku cadang"]);
+  result.spklKey = findKey(["spkl", "pekerjaan luar", "subcont", "subkontrak", "jasa luar", "pekerjaan subcont", "subkontraktor"]);
+  result.jumlahPanelKey = findKey(["jumlah panel", "jumlah_panel", "panel", "qty panel", "jml panel", "banyak panel", "total panel", "panel count"]);
+  result.wilayahKey = findKey(["wilayah", "cabang", "region", "area", "kota", "lokasi", "site", "outlet"]);
+
+  // Detect basic Date pattern from samples
+  for (const key of keys) {
+    if (result.tanggalKey === key) {
+      const val = sampleObj[key];
+      if (typeof val === "number") {
+        result.dateFormat = "Excel Serial";
+      } else if (typeof val === "string") {
+        if (val.includes("-")) {
+          result.dateFormat = "YYYY-MM-DD";
+        } else if (val.includes("/")) {
+          result.dateFormat = "MM/DD/YYYY";
+        }
+      }
+    }
+  }
+
+  // Fallback defaults for missing required keys to make sure valid mapping is populated
+  if (!result.tanggalKey) result.tanggalKey = keys.find(k => k.toLowerCase().includes("tgl") || k.toLowerCase().includes("date")) || keys[0] || "";
+  if (!result.noSpkKey) result.noSpkKey = keys.find(k => k.toLowerCase().includes("spk") || k.toLowerCase().includes("no") || k.toLowerCase().includes("inv")) || keys[1] || "";
+  if (!result.asuransiKey) result.asuransiKey = keys.find(k => k.toLowerCase().includes("asuransi") || k.toLowerCase().includes("cust")) || keys[2] || "";
+
+  return result;
+}
+
 // AI Mapper Endpoint for Excel imports
 app.post("/api/ai-mapper", async (req, res) => {
+  const { sampleData } = req.body; // array of up to 5 objects from Excel rows
+
   if (!ai) {
-    return res.status(503).json({ error: "Gemini API belum dikonfigurasi. Backend AI screening memerlukan API Key!" });
+    console.warn("Gemini API not configured, running smart semantic heuristic mapper instead.");
+    const mappingConfig = fallbackMapper(sampleData);
+    return res.json(mappingConfig);
   }
 
   try {
-    const { sampleData } = req.body; // array of up to 5 objects from Excel rows
     const gResult = await ai.models.generateContent({
       model: "gemini-3.5-flash",
       contents: `
@@ -424,8 +565,9 @@ app.post("/api/ai-mapper", async (req, res) => {
     const mappingConfig = JSON.parse(responseText.trim());
     res.json(mappingConfig);
   } catch (error: any) {
-    console.error("AI Mapper Failed:", error);
-    res.status(500).json({ error: "Gagal memproses data melalui backend AI AI Studio", message: error.message });
+    console.warn("AI Mapper Failed. Falling back to smart semantic heuristic column mapper due to error:", error.message || error);
+    const mappingConfig = fallbackMapper(sampleData);
+    res.json(mappingConfig);
   }
 });
 

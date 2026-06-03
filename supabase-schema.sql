@@ -35,6 +35,12 @@ ON public.body_repair_records FOR SELECT USING (true);
 CREATE POLICY "Allow open insert to authenticated and public" 
 ON public.body_repair_records FOR INSERT WITH CHECK (true);
 
+CREATE POLICY "Allow open update to authenticated and public" 
+ON public.body_repair_records FOR UPDATE USING (true) WITH CHECK (true);
+
+CREATE POLICY "Allow open delete to authenticated and public" 
+ON public.body_repair_records FOR DELETE USING (true);
+
 -- 4. Sample row verification payload
 -- INSERT INTO public.body_repair_records (tanggal, week, no_spk, asuransi, jasa_nett, part_material_nett, expenses_bahan, hpp_part_material, spkl, jumlah_panel, wilayah) VALUES
 -- ('2026-06-01', 1, 'SPK-2026-06-001', 'Astra Garda Oto', 3750000.00, 1800000.00, 675000.00, 720000.00, 150000.00, 5, 'Jakarta Selatan');
