@@ -7,7 +7,7 @@ import express from "express";
 import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { BodyRepairRecord, MetricSummary, ParetoItem, AlternativeSolution, QuantitativeMatrix, ProblemAnalysisResponse, LogicTreeNode } from "./src/types";
+import { BodyRepairRecord, MetricSummary, ParetoItem, AlternativeSolution, QuantitativeMatrix, ProblemAnalysisResponse, LogicTreeNode } from "./src/types.js";
 
 // Load environment variables
 dotenv.config();
@@ -189,7 +189,7 @@ app.post("/api/records/bulk", (req, res) => {
 
 app.post("/api/records/reset", (req, res) => {
   recordsDatabase = generateSeedData();
-  res.json({ message: "Database reset to professional seed data", recordCount: recordsDatabase.length });
+  res.json({ message: "Database reset to professional seed data", recordCount: recordsDatabase.length, records: recordsDatabase });
 });
 
 // Settings App Config State

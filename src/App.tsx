@@ -67,21 +67,20 @@ export default function App() {
     try {
       const res = await fetch("/api/records/reset", { method: "POST" });
       const data = await res.json();
-      setRecords(generateSimulationRecordsFallback(data.recordCount));
+      if (data.records && Array.isArray(data.records)) {
+        setRecords(data.records);
+      } else {
+        await fetchRecords();
+      }
       setSelectedYear(2026);
       setSelectedMonth(6);
       setActiveWeek("ALL");
-      await fetchRecords();
     } catch (e) {
       console.error(e);
+      await fetchRecords();
     } finally {
       setLoading(false);
     }
-  };
-
-  // Helper inside fallback in case of connection limits during first boot
-  const generateSimulationRecordsFallback = (count: number) => {
-    return [];
   };
 
   // Calculate distinct available Years & Months in the dataset to drive dropdowns dynamically
