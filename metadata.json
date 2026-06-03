@@ -1,0 +1,8 @@
+{
+  "name": "Sistem Analisis Body Repair",
+  "description": "Sistem Analisis Data Body Repair berbasis Full-stack dengan analisis Pareto, pohon logika, dan matriks solusi bertenaga AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
