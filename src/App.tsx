@@ -9,11 +9,12 @@ import { filterAndSummarize, generateComparativeMatrix, getMonthName } from "./l
 import Dashboard from "./components/Dashboard.js";
 import AnalysisPanel from "./components/AnalysisPanel.js";
 import UploadManager from "./components/UploadManager.js";
-import { Grid, BrainCircuit, UploadCloud, RefreshCw, BarChart4, Mail, Milestone, HelpCircle, Calendar, Sparkles } from "lucide-react";
+import SettingsPanel from "./components/SettingsPanel.js";
+import { Grid, BrainCircuit, UploadCloud, RefreshCw, BarChart4, Mail, Milestone, HelpCircle, Calendar, Sparkles, Settings } from "lucide-react";
 import { motion } from "motion/react";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "analysis" | "upload">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "analysis" | "upload" | "settings">("dashboard");
   const [records, setRecords] = useState<BodyRepairRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorHeader, setErrorHeader] = useState("");
@@ -209,7 +210,8 @@ export default function App() {
           {[
             { id: "dashboard", label: "Dashboard", icon: Grid },
             { id: "analysis", label: "Analisis Masalah", icon: BrainCircuit },
-            { id: "upload", label: "Unggah Database", icon: UploadCloud }
+            { id: "upload", label: "Unggah Database", icon: UploadCloud },
+            { id: "settings", label: "Pengaturan", icon: Settings }
           ].map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -343,6 +345,8 @@ export default function App() {
                 currentCount={records.length}
               />
             )}
+
+            {activeTab === "settings" && <SettingsPanel />}
           </div>
         )}
 

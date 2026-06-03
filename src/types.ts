@@ -3,6 +3,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export interface AppSettings {
+  mechanicsCount: number;
+  sprayboothsCount: number;
+  holidays: string[]; // YYYY-MM-DD
+}
+
+export interface AiMappingConfig {
+  tanggalKey: string;
+  noSpkKey: string;
+  asuransiKey: string;
+  jasaNettKey: string;
+  partMaterialNettKey: string;
+  expensesBahanKey: string;
+  hppPartMaterialKey: string;
+  spklKey: string;
+  jumlahPanelKey: string;
+  wilayahKey: string;
+  dateFormat: string; // e.g. "YYYY-MM-DD" or "DD/MM/YYYY"
+}
+
 export interface BodyRepairRecord {
   id: string;
   tanggal: string; // Format: YYYY-MM-DD

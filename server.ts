@@ -5,7 +5,6 @@
 
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { BodyRepairRecord, MetricSummary, ParetoItem, AlternativeSolution, QuantitativeMatrix, ProblemAnalysisResponse, LogicTreeNode } from "./src/types.js";
@@ -146,7 +145,21 @@ app.post("/api/records/bulk", (req, res) => {
     // Attempt standard fallbacks if some values are missing
     const tanggal = typeof item.tanggal === "string" ? item.tanggal : new Date().toISOString().split("T")[0];
     const dateObj = new Date(tanggal);
-    const resolvedWeek = typeof item.week === "number" ? item.week : Math.min(5, Math.floor((dateObj.getDate() - 1) / 7) + 1);
+    
+    // Calculate week based on working days (excluding Sundays and settings.holidays)
+    let workingDaysCount = 0;
+    const year = dateObj.getFullYear();
+    const month = dateObj.getMonth();
+    for (let day = 1; day <= dateObj.getDate(); day++) {
+      const d = new Date(year, month, day);
+      const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      if (d.getDay() !== 0 && !appSettings.holidays.includes(dateStr)) {
+        workingDaysCount++;
+      }
+    }
+    const calculatedWeek = Math.min(5, Math.max(1, Math.ceil(workingDaysCount / 6)));
+    
+    const resolvedWeek = typeof item.week === "number" && item.week > 0 ? item.week : calculatedWeek;
 
     const record: BodyRepairRecord = {
       id: item.id || `INV-UPL-${Date.now()}-${i}`,
@@ -176,6 +189,90 @@ app.post("/api/records/bulk", (req, res) => {
 app.post("/api/records/reset", (req, res) => {
   recordsDatabase = generateSeedData();
   res.json({ message: "Database reset to professional seed data", recordCount: recordsDatabase.length });
+});
+
+// Settings App Config State
+let appSettings = {
+  mechanicsCount: 15,
+  sprayboothsCount: 4,
+  holidays: [] as string[]
+};
+
+app.get("/api/settings", (req, res) => {
+  res.json(appSettings);
+});
+
+app.post("/api/settings", (req, res) => {
+  const { mechanicsCount, sprayboothsCount, holidays } = req.body;
+  if (mechanicsCount !== undefined) appSettings.mechanicsCount = Number(mechanicsCount);
+  if (sprayboothsCount !== undefined) appSettings.sprayboothsCount = Number(sprayboothsCount);
+  if (Array.isArray(holidays)) appSettings.holidays = holidays;
+  res.json({ message: "Settings updated", settings: appSettings });
+});
+
+// AI Mapper Endpoint for Excel imports
+app.post("/api/ai-mapper", async (req, res) => {
+  if (!ai) {
+    return res.status(503).json({ error: "Gemini API belum dikonfigurasi. Backend AI screening memerlukan API Key!" });
+  }
+
+  try {
+    const { sampleData } = req.body; // array of up to 5 objects from Excel rows
+    const gResult = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: `
+        Anda adalah asisten data backend pintar. Saya memiliki baris data (format JSON) dari file Excel yang diupload user.
+        Anda harus melakukan screening kolom/header yang tersedia di data sample tersebut dan memetakannya ke kunci backend kami.
+        
+        Kunci yang WAJIB DARI BACKEND:
+        - tanggalKey (untuk tanggal transaksi)
+        - noSpkKey (untuk nomor SPK/Transaksi)
+        - asuransiKey (untuk nama asuransi/pelanggan)
+        - jasaNettKey (nominal jasa nett)
+        - partMaterialNettKey (nominal nett sparepart & material)
+        - expensesBahanKey (nominal expenses/pengeluaran bahan)
+        - hppPartMaterialKey (nominal harga pokok penjualan part/material)
+        - spklKey (nominal Jasa Pekerjaan Luar/Subkontrak)
+        - jumlahPanelKey (jumlah panel / keping perbaikan)
+        - wilayahKey (wilayah cabang / asal perbaikan)
+        
+        Anda juga harus mendeteksi 'dateFormat' dari kolom tanggal yang dipetakan (misalnya: "M/D/YY", "MM-DD-YYYY", "YYYY-MM-DD", "Excel Serial", dll).
+        
+        Data Sample (beberapa baris):
+        ${JSON.stringify(sampleData, null, 2)}
+        
+        Tugas Anda:
+        Amati keys/property names dari Data Sample di atas.
+        Hasilkan JSON response berupa pemetaan untuk key yang tepat di setiap variabel backend. Jika tidak ada kolom yang cocok, isi dengan string kosong "".
+        Format struktur balasan persis sebagai berikut:
+        {
+          "tanggalKey": "Nama_Kolom_Di_Sample",
+          "noSpkKey": "...",
+          "asuransiKey": "...",
+          "jasaNettKey": "...",
+          "partMaterialNettKey": "...",
+          "expensesBahanKey": "...",
+          "hppPartMaterialKey": "...",
+          "spklKey": "...",
+          "jumlahPanelKey": "...",
+          "wilayahKey": "...",
+          "dateFormat": "MM/DD/YYYY"
+        }
+        Jangan tambahkan markdown \`\`\`json. Output harus raw JSON object murni.
+      `,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.1
+      }
+    });
+
+    const responseText = gResult.text || "{}";
+    const mappingConfig = JSON.parse(responseText.trim());
+    res.json(mappingConfig);
+  } catch (error: any) {
+    console.error("AI Mapper Failed:", error);
+    res.status(500).json({ error: "Gagal memproses data melalui backend AI AI Studio", message: error.message });
+  }
 });
 
 // PROBLEM SOLVER ENDPOINT
@@ -468,10 +565,13 @@ app.post("/api/analyze", async (req, res) => {
   res.json(baseResponse);
 });
 
+export default app;
+
 // VITE MIDDLEWARE CONFIG FOR DEV & PROD
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     console.log("Using Vite Development Middleware Mode");
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -491,4 +591,6 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
