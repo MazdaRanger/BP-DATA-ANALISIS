@@ -345,7 +345,7 @@ export default function App() {
               />
             )}
 
-            {activeTab === "settings" && <SettingsPanel />}
+            {activeTab === "settings" && <SettingsPanel onDatabaseChanged={fetchRecords} />}
           </div>
         )}
 

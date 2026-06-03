@@ -1,11 +1,21 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Save, Calendar as CalendarIcon, Users, Building, Info, AlertTriangle, RefreshCw } from "lucide-react";
+import { Settings, Save, Calendar as CalendarIcon, Users, Building, Info, AlertTriangle, RefreshCw, Database, Trash2, ShieldAlert } from "lucide-react";
 import { AppSettings } from "../types.js";
 
-export default function SettingsPanel() {
+interface SettingsPanelProps {
+  onDatabaseChanged?: () => void;
+}
+
+export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps) {
   const [settings, setSettings] = useState<AppSettings>({ mechanicsCount: 15, sprayboothsCount: 4, holidays: [] });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  
+  // Database control states
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [dbLoading, setDbLoading] = useState(false);
+  const [dbMessage, setDbMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
   // Date picker state
   const [currentDate, setCurrentDate] = useState(new Date(2026, 5)); // default to June 2026
@@ -43,6 +53,44 @@ export default function SettingsPanel() {
       alert("Gagal menyimpan pengaturan");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleClearDatabase = async () => {
+    setDbLoading(true);
+    setDbMessage(null);
+    try {
+      const res = await fetch("/api/records/clear", { method: "POST" });
+      if (res.ok) {
+        setDbMessage({ type: "success", text: "Database berhasil dikosongkan secara permanen!" });
+        if (onDatabaseChanged) onDatabaseChanged();
+      } else {
+        throw new Error("Gagal mengosongkan database");
+      }
+    } catch (e: any) {
+      setDbMessage({ type: "error", text: e.message || "Gagal menghubungi server backend." });
+    } finally {
+      setDbLoading(false);
+      setShowClearConfirm(false);
+    }
+  };
+
+  const handleLoadSeedData = async () => {
+    setDbLoading(true);
+    setDbMessage(null);
+    try {
+      const res = await fetch("/api/records/reset", { method: "POST" });
+      if (res.ok) {
+        setDbMessage({ type: "success", text: "Data simulasi profesional berhasil dimuat!" });
+        if (onDatabaseChanged) onDatabaseChanged();
+      } else {
+        throw new Error("Gagal memuat data simulasi");
+      }
+    } catch (e: any) {
+      setDbMessage({ type: "error", text: e.message || "Gagal menghubungi server backend." });
+    } finally {
+      setDbLoading(false);
+      setShowResetConfirm(false);
     }
   };
 
@@ -207,6 +255,126 @@ export default function SettingsPanel() {
           {renderCalendar()}
         </div>
 
+      </div>
+
+      {/* Zona Risiko Tinggi - Pengelolaan Database */}
+      <div id="db-danger-zone" className="bg-[#111111]/90 border border-red-950/40 p-6 rounded-xl space-y-4">
+        <h4 className="text-sm font-bold text-red-400 flex items-center gap-2 border-b border-red-950 pb-3">
+          <Database className="w-4 h-4 text-red-500" /> Pengelolaan Database & Manajemen Data
+        </h4>
+
+        {dbMessage && (
+          <div className={`p-3 rounded-lg text-xs font-mono border ${
+            dbMessage.type === "success" 
+              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-300" 
+              : "bg-red-500/10 border-red-500/20 text-red-300"
+          }`}>
+            {dbMessage.text}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Card 1: Kosongkan Database */}
+          <div className="p-4 bg-red-950/5 border border-red-950/25 rounded-lg space-y-3 flex flex-col justify-between">
+            <div className="space-y-1">
+              <span className="text-xs bg-red-500/10 text-red-400 px-2.5 py-0.5 rounded-full font-mono font-bold tracking-wider uppercase">High Risk Zone</span>
+              <h5 className="text-xs font-bold text-white uppercase tracking-wider font-sans mt-2">Kosongkan Seluruh Database</h5>
+              <p className="text-xs text-gray-400 font-mono leading-relaxed">
+                Tindakan ini akan menghapus semua record transaksi body repair yang ada di dalam server memori. Seluruh visualisasi dashboard dan model analisis AI akan menjadi kosong sampai data baru diunggah.
+              </p>
+            </div>
+            
+            {!showClearConfirm ? (
+              <button
+                onClick={() => {
+                  setShowClearConfirm(true);
+                  setShowResetConfirm(false);
+                }}
+                disabled={dbLoading}
+                className="w-full text-center px-3 py-2 bg-red-950/40 border border-red-800/50 hover:bg-red-900 hover:text-white rounded text-red-300 text-xs font-bold transition flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-400" /> Kosongkan Database
+              </button>
+            ) : (
+              <div className="p-3 bg-red-500/10 border border-red-500/10 rounded-lg space-y-2.5">
+                <p className="text-[11px] text-red-300 font-bold flex items-center gap-1 uppercase tracking-wider">
+                  <ShieldAlert className="w-3.5 h-3.5 text-red-500 shrink-0" /> Konfirmasi Tindakan Berisiko Tinggi!
+                </p>
+                <p className="text-[10px] text-gray-300 font-mono leading-relaxed">
+                  Ketik <span className="font-bold underline text-red-400">HAPUS</span> untuk mengonfirmasi penghapusan permanen secara permanen.
+                </p>
+                <input 
+                  type="text"
+                  placeholder="Ketik HAPUS..."
+                  id="confirm-delete-input"
+                  className="w-full bg-[#1a1a1a] border border-red-850/40 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-red-500"
+                  onChange={(e) => {
+                    if (e.target.value === "HAPUS") {
+                      handleClearDatabase();
+                      e.target.value = "";
+                    }
+                  }}
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowClearConfirm(false)}
+                    className="px-2.5 py-1 bg-[#222] hover:bg-[#333] border border-[#262626] rounded text-gray-400 text-[10px] hover:text-white"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Card 2: Isi Ulang Data Simulasi */}
+          <div className="p-4 bg-indigo-950/5 border border-indigo-950/20 rounded-lg space-y-3 flex flex-col justify-between">
+            <div className="space-y-1">
+              <span className="text-xs bg-indigo-500/10 text-indigo-400 px-2.5 py-0.5 rounded-full font-mono font-bold tracking-wider uppercase">Exploration Tool</span>
+              <h5 className="text-xs font-bold text-white uppercase tracking-wider font-sans mt-2">Muat Professional Seed Data</h5>
+              <p className="text-xs text-gray-400 font-mono leading-relaxed">
+                Tindakan ini akan mengisi ulang database memori dengan 60 record transaksi fiktif tetapi realistis (Tahun 2025 s.d 2026). Berguna untuk mendemonstrasikan kapabilitas analisis trend keuangan dan deteksi bottleneck AI.
+              </p>
+            </div>
+
+            {!showResetConfirm ? (
+              <button
+                onClick={() => {
+                  setShowResetConfirm(true);
+                  setShowClearConfirm(false);
+                }}
+                disabled={dbLoading}
+                className="w-full text-center px-4 py-2 bg-indigo-950/40 border border-indigo-800/40 hover:bg-indigo-900 hover:text-white rounded text-indigo-300 text-xs font-bold transition flex items-center justify-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-indigo-400 ${dbLoading ? "animate-spin" : ""}`} /> Muat Data Simulasi
+              </button>
+            ) : (
+              <div className="p-3 bg-indigo-500/10 border border-indigo-500/10 rounded-lg space-y-2.5">
+                <p className="text-[11px] text-indigo-300 font-bold flex items-center gap-1 uppercase tracking-wider text-glow-cyan">
+                  <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0" /> Konfirmasi Muat Data Simulasi
+                </p>
+                <p className="text-[10px] text-gray-300 font-mono leading-relaxed">
+                  Semua record yang terunggah saat ini akan diganti oleh seed data. Apakah Anda yakin ingin memuat ulang data simulasi?
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowResetConfirm(false)}
+                    className="px-2.5 py-1 bg-[#121212] hover:bg-[#1a1a1a] border border-[#262626] rounded text-gray-400 text-[10px] hover:text-white"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={handleLoadSeedData}
+                    disabled={dbLoading}
+                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold"
+                  >
+                    Ya, Muat Seed
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
     </div>

@@ -7,6 +7,7 @@ import express from "express";
 import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
 import { BodyRepairRecord, MetricSummary, ParetoItem, AlternativeSolution, QuantitativeMatrix, ProblemAnalysisResponse, LogicTreeNode } from "./src/types.js";
 
 // Load environment variables
@@ -16,6 +17,58 @@ const app = express();
 app.use(express.json({ limit: "50mb" }));
 
 const PORT = 3000;
+
+// Initialize Supabase Client
+const supabaseUrl = process.env.SUPABASE_URL || "https://kpetlflosuysqnmfhfmf.supabase.co";
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtwZXRsZmxvc3V5c3FubWZoZm1mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MjczOTcsImV4cCI6MjA5NjAwMzM5N30.FoF6KIctyi6_BNAGWjiaUnzewXAHHaxyHBTUX0CVuNk";
+
+let supabase: any = null;
+if (supabaseUrl && supabaseAnonKey) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+    console.log("Supabase Client initialized successfully with URL:", supabaseUrl);
+  } catch (error) {
+    console.error("Failed to initialize Supabase client:", error);
+  }
+}
+
+// Convert Supabase DB snake_case record to frontend camelCase type
+function toModel(dbRow: any): BodyRepairRecord {
+  return {
+    id: dbRow.id,
+    tanggal: dbRow.tanggal,
+    week: Number(dbRow.week),
+    noSpk: dbRow.no_spk,
+    asuransi: dbRow.asuransi,
+    jasaNett: Number(dbRow.jasa_nett),
+    partMaterialNett: Number(dbRow.part_material_nett),
+    expensesBahan: Number(dbRow.expenses_bahan),
+    hppPartMaterial: Number(dbRow.hpp_part_material),
+    spkl: Number(dbRow.spkl),
+    jumlahPanel: Number(dbRow.jumlah_panel),
+    wilayah: dbRow.wilayah
+  };
+}
+
+// Convert frontend camelCase type to Supabase DB snake_case insert payload
+function toDb(model: Partial<BodyRepairRecord>): any {
+  const db: any = {};
+  if (model.id && !model.id.startsWith("INV-") && !model.id.startsWith("INV-UPL-") && !model.id.startsWith("SPK-UPL-")) {
+    db.id = model.id;
+  }
+  db.tanggal = model.tanggal;
+  db.week = model.week;
+  db.no_spk = model.noSpk;
+  db.asuransi = model.asuransi;
+  db.jasa_nett = model.jasaNett;
+  db.part_material_nett = model.partMaterialNett;
+  db.expenses_bahan = model.expensesBahan;
+  db.hpp_part_material = model.hppPartMaterial;
+  db.spkl = model.spkl;
+  db.jumlah_panel = model.jumlahPanel;
+  db.wilayah = model.wilayah;
+  return db;
+}
 
 // Initialize Gemini API client if key exists
 let ai: GoogleGenAI | null = null;
@@ -124,15 +177,33 @@ function generateSeedData(): BodyRepairRecord[] {
   return seeds;
 }
 
-// Initial seed
-recordsDatabase = generateSeedData();
+// Initial seed starts empty for real-time usage (user can load simulation seed data manually)
+recordsDatabase = [];
 
 // API REST 
-app.get("/api/records", (req, res) => {
+app.get("/api/records", async (req, res) => {
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("body_repair_records")
+        .select("*")
+        .order("tanggal", { ascending: false });
+      
+      if (!error && data) {
+        const records = data.map(toModel);
+        recordsDatabase = records;
+        return res.json(records);
+      } else if (error) {
+        console.error("Supabase select error:", error);
+      }
+    } catch (e) {
+      console.error("Failed to fetch records from Supabase:", e);
+    }
+  }
   res.json(recordsDatabase);
 });
 
-app.post("/api/records/bulk", (req, res) => {
+app.post("/api/records/bulk", async (req, res) => {
   const newRecords: Partial<BodyRepairRecord>[] = req.body;
   if (!Array.isArray(newRecords)) {
     return res.status(400).json({ error: "Input must be a JSON array of records" });
@@ -167,30 +238,112 @@ app.post("/api/records/bulk", (req, res) => {
       tanggal: tanggal,
       week: resolvedWeek,
       noSpk: item.noSpk || `SPK-UPL-${1000 + i}`,
-      asuransi: item.asuransi || "Personal",
+      asuransi: item.asuransi || "Personal (Umum)",
       jasaNett: Number(item.jasaNett) || 0,
       partMaterialNett: Number(item.partMaterialNett) || 0,
       expensesBahan: Number(item.expensesBahan) || 0,
       hppPartMaterial: Number(item.hppPartMaterial) || 0,
       spkl: Number(item.spkl) || 0,
       jumlahPanel: Number(item.jumlahPanel) || 1,
-      wilayah: item.wilayah || "Jakarta"
+      wilayah: item.wilayah || "Jakarta Selatan"
     };
 
     validated.push(record);
   }
 
-  // Replace database or prepend
-  // In our case we overwrite existing to simulate an "Upload context", 
-  // or we can append. Overwriting is better to start a clean analysis on uploaded data.
+  if (supabase) {
+    try {
+      // Clear Supabase completely first as specified by the standard overwrite context of the app
+      const { error: deleteError } = await supabase
+        .from("body_repair_records")
+        .delete()
+        .neq("no_spk", "");
+      if (deleteError) {
+        console.error("Failed to clear Supabase before bulk upload:", deleteError);
+      }
+
+      // Bulk insert in chunks of 50 to avoid size limitations
+      const dbPayload = validated.map(toDb);
+      const chunkSize = 50;
+      for (let i = 0; i < dbPayload.length; i += chunkSize) {
+        const chunk = dbPayload.slice(i, i + chunkSize);
+        const { error: insertError } = await supabase
+          .from("body_repair_records")
+          .insert(chunk);
+        
+        if (insertError) {
+          console.error("Error inserting bulk chunk to Supabase:", insertError);
+          throw insertError;
+        }
+      }
+
+      recordsDatabase = validated;
+      return res.json({ 
+        message: `Successfully loaded ${validated.length} records into your live Supabase database!`, 
+        recordCount: validated.length 
+      });
+    } catch (e: any) {
+      console.error("Error writing to Supabase during bulk upload, falling back to memory:", e);
+    }
+  }
+
+  // Backup in-memory fallback
   recordsDatabase = validated;
-  res.json({ message: `Successfully loaded ${validated.length} records into the analyzer!`, recordCount: recordsDatabase.length });
+  res.json({ message: `Successfully loaded ${validated.length} records into the memory analyzer!`, recordCount: recordsDatabase.length });
 });
 
-app.post("/api/records/reset", (req, res) => {
-  recordsDatabase = generateSeedData();
-  res.json({ message: "Database reset to professional seed data", recordCount: recordsDatabase.length, records: recordsDatabase });
+app.post("/api/records/reset", async (req, res) => {
+  const seeds = generateSeedData();
+  if (supabase) {
+    try {
+      // Clear Supabase completely
+      const { error: deleteError } = await supabase
+        .from("body_repair_records")
+        .delete()
+        .neq("no_spk", "");
+      if (deleteError) {
+        console.error("Error deleting old seeds in Supabase:", deleteError);
+      }
+
+      // Insert new seed rows in chunks
+      const dbPayload = seeds.map(toDb);
+      const chunkSize = 50;
+      for (let i = 0; i < dbPayload.length; i += chunkSize) {
+        const chunk = dbPayload.slice(i, i + chunkSize);
+        const { error: insertError } = await supabase
+          .from("body_repair_records")
+          .insert(chunk);
+        
+        if (insertError) throw insertError;
+      }
+      recordsDatabase = seeds;
+      return res.json({ message: "Database reset to professional seed data in Supabase & memory", recordCount: seeds.length, records: seeds });
+    } catch (e) {
+      console.error("Error writing seeds to Supabase, fallback to memory:", e);
+    }
+  }
+  recordsDatabase = seeds;
+  res.json({ message: "Database reset to professional seed data in memory fallback", recordCount: recordsDatabase.length, records: recordsDatabase });
 });
+
+app.post("/api/records/clear", async (req, res) => {
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from("body_repair_records")
+        .delete()
+        .neq("no_spk", "");
+      if (error) throw error;
+      recordsDatabase = [];
+      return res.json({ message: "Supabase database cleared successfully", recordCount: 0, records: [] });
+    } catch (e) {
+      console.error("Error clearing Supabase database:", e);
+    }
+  }
+  recordsDatabase = [];
+  res.json({ message: "Database cleared successfully", recordCount: 0, records: [] });
+});
+
 
 // Settings App Config State
 let appSettings = {
