@@ -19,9 +19,10 @@ const PORT = 3000;
 
 // Initialize Gemini API client if key exists
 let ai: GoogleGenAI | null = null;
-if (process.env.GEMINI_API_KEY) {
+const apiKey = process.env.GEMINI_API_KEY || "AQ.Ab8RN6I3Zt5O1dRMyFtAGTCv1xi1HFoSzvDZIKO89FfeJ7z4HA";
+if (apiKey) {
   ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: apiKey,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
