@@ -7,7 +7,9 @@ import express from "express";
 import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { createClient } from "@supabase/supabase-js";
+import fs from "fs";
+import { initializeApp } from "firebase/app";
+import { initializeFirestore, collection, getDocs, setDoc, deleteDoc, doc, writeBatch } from "firebase/firestore";
 import { BodyRepairRecord, MetricSummary, ParetoItem, AlternativeSolution, QuantitativeMatrix, ProblemAnalysisResponse, LogicTreeNode } from "./src/types.js";
 
 // Load environment variables
@@ -18,54 +20,54 @@ app.use(express.json({ limit: "50mb" }));
 
 const PORT = 3000;
 
-// Initialize Supabase Client
-const supabaseUrl = process.env.SUPABASE_URL || "https://kpetlflosuysqnmfhfmf.supabase.co";
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtwZXRsZmxvc3V5c3FubWZoZm1mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MjczOTcsImV4cCI6MjA5NjAwMzM5N30.FoF6KIctyi6_BNAGWjiaUnzewXAHHaxyHBTUX0CVuNk";
-
-let supabase: any = null;
-if (supabaseUrl && supabaseAnonKey) {
-  try {
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
-    console.log("Supabase Client initialized successfully with URL:", supabaseUrl);
-  } catch (error) {
-    console.error("Failed to initialize Supabase client:", error);
+// Initialize Firebase Client
+let firebaseDb: any = null;
+try {
+  if (fs.existsSync("./firebase-applet-config.json")) {
+    const config = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf8"));
+    const firebaseApp = initializeApp(config);
+    firebaseDb = initializeFirestore(firebaseApp, { experimentalAutoDetectLongPolling: true }, config.firestoreDatabaseId);
+    console.log("Firebase initialized successfully with project:", config.projectId);
+  } else {
+    console.warn("firebase-applet-config.json not found. Offline memory mode active.");
   }
+} catch (error) {
+  console.error("Failed to initialize Firebase:", error);
 }
 
-// Clean logger for Supabase errors to provide precise diagnostics
-function logSupabaseError(context: string, error: any) {
+// Clean logger for Firebase errors
+function logFirebaseError(context: string, error: any) {
   if (error) {
-    console.error(`[Supabase Error] ${context} failed: ${JSON.stringify({
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      code: error.code
-    })}`);
+    if (error.code === "permission-denied" || (error.message && error.message.includes("Missing or insufficient permissions"))) {
+      console.warn(`[Firebase Warning] Security rules not deployed or table access denied, falling back to local memory. (${context})`);
+      return;
+    }
+    console.error(`[Firebase Error] ${context} failed:`, error.message);
   }
 }
 
-// Convert Supabase DB snake_case record to frontend camelCase type
-function toModel(dbRow: any): BodyRepairRecord {
+// Convert Firebase doc to frontend camelCase type
+function toModel(docId: string, dbRow: any): BodyRepairRecord {
   return {
-    id: dbRow.id,
+    id: dbRow.id || docId,
     tanggal: dbRow.tanggal,
     week: Number(dbRow.week),
-    noSpk: dbRow.no_spk,
+    noSpk: dbRow.no_spk || dbRow.noSpk,
     asuransi: dbRow.asuransi,
-    jasaNett: Number(dbRow.jasa_nett),
-    partMaterialNett: Number(dbRow.part_material_nett),
-    expensesBahan: Number(dbRow.expenses_bahan),
-    hppPartMaterial: Number(dbRow.hpp_part_material),
+    jasaNett: Number(dbRow.jasa_nett || dbRow.jasaNett),
+    partMaterialNett: Number(dbRow.part_material_nett || dbRow.partMaterialNett),
+    expensesBahan: Number(dbRow.expenses_bahan || dbRow.expensesBahan),
+    hppPartMaterial: Number(dbRow.hpp_part_material || dbRow.hppPartMaterial),
     spkl: Number(dbRow.spkl),
-    jumlahPanel: Number(dbRow.jumlah_panel),
+    jumlahPanel: Number(dbRow.jumlah_panel || dbRow.jumlahPanel),
     wilayah: dbRow.wilayah
   };
 }
 
-// Convert frontend camelCase type to Supabase DB snake_case insert payload
+// Convert frontend camelCase type to Firebase DB snake_case payload
 function toDb(model: Partial<BodyRepairRecord>): any {
   const db: any = {};
-  // Exclude primary key id so Supabase always generates standard UUIDs seamlessly
+  db.id = model.id;
   db.tanggal = model.tanggal;
   db.week = model.week;
   db.no_spk = model.noSpk;
@@ -192,43 +194,30 @@ recordsDatabase = [];
 
 // API REST 
 app.get("/api/database-status", async (req, res) => {
-  if (!supabase) {
+  if (!firebaseDb) {
     return res.json({
       connected: false,
       errorType: "NOT_INITIALIZED",
-      message: "Supabase client not initialized. Check your environment variables."
+      message: "Firebase client not initialized. Check your environment variables."
     });
   }
 
   try {
-    const { data, error } = await supabase
-      .from("body_repair_records")
-      .select("id")
-      .limit(1);
-
-    if (error) {
-      if (error.message && error.message.includes("does not exist")) {
-        return res.json({
-          connected: false,
-          errorType: "TABLE_MISSING",
-          message: "Tabel 'body_repair_records' belum dibuat di Supabase Anda atau relasi tidak ditemukan. Pastikan Anda sudah menjalankan script 'supabase-schema.sql'.",
-          details: error.message
-        });
-      }
-      return res.json({
-        connected: false,
-        errorType: "SUPABASE_ERROR",
-        message: `Terjadi kendala pada koneksi Supabase: ${error.message}`,
-        details: error
-      });
-    }
-
+    const snap = await getDocs(collection(firebaseDb, "body_repair_records"));
     return res.json({
       connected: true,
       errorType: null,
-      message: "Koneksi live Supabase sinkron dan aktif!",
+      message: "Koneksi live Firebase sinkron dan aktif!",
     });
   } catch (e: any) {
+    if (e?.code === "permission-denied" || (e?.message && e.message.includes("Missing or insufficient permissions"))) {
+        return res.json({
+          connected: false,
+          errorType: "TABLE_MISSING",
+          message: "Tabel 'body_repair_records' kekurangan hak akses via Firebase Rules. Memory Sandbox fallback aktif.",
+          details: e.message
+        });
+    }
     return res.json({
       connected: false,
       errorType: "SERVER_EXCEPTION",
@@ -238,22 +227,14 @@ app.get("/api/database-status", async (req, res) => {
 });
 
 app.get("/api/records", async (req, res) => {
-  if (supabase) {
+  if (firebaseDb) {
     try {
-      const { data, error } = await supabase
-        .from("body_repair_records")
-        .select("*")
-        .order("tanggal", { ascending: false });
-      
-      if (!error && data) {
-        const records = data.map(toModel);
-        recordsDatabase = records;
-        return res.json(records);
-      } else if (error) {
-        logSupabaseError("GET /api/records select", error);
-      }
-    } catch (e) {
-      console.error("Failed to fetch records from Supabase:", e);
+      const snap = await getDocs(collection(firebaseDb, "body_repair_records"));
+      const records = snap.docs.map(docSnap => toModel(docSnap.id, docSnap.data()));
+      recordsDatabase = records;
+      return res.json(records);
+    } catch (e: any) {
+      logFirebaseError("GET /api/records", e);
     }
   }
   res.json(recordsDatabase);
@@ -272,7 +253,10 @@ app.post("/api/records/bulk", async (req, res) => {
     
     // Attempt standard fallbacks if some values are missing
     const tanggal = typeof item.tanggal === "string" ? item.tanggal : new Date().toISOString().split("T")[0];
-    const dateObj = new Date(tanggal);
+    let dateObj = new Date(tanggal);
+    if (isNaN(dateObj.getTime())) {
+      dateObj = new Date();
+    }
     
     // Calculate week based on working days (excluding Sundays and settings.holidays)
     let workingDaysCount = 0;
@@ -307,39 +291,29 @@ app.post("/api/records/bulk", async (req, res) => {
     validated.push(record);
   }
 
-  if (supabase) {
+  if (firebaseDb) {
     try {
-      // Clear Supabase completely first as specified by the standard overwrite context of the app
-      const { error: deleteError } = await supabase
-        .from("body_repair_records")
-        .delete()
-        .neq("no_spk", "");
-      if (deleteError) {
-        logSupabaseError("Bulk upload clear step", deleteError);
-      }
+      // Clear Firebase completely first as specified by the standard overwrite context of the app
+      const existingSnap = await getDocs(collection(firebaseDb, "body_repair_records"));
+      const batchClear = writeBatch(firebaseDb);
+      existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
+      await batchClear.commit().catch(e => logFirebaseError("Clear database", e));
 
-      // Bulk insert in chunks of 50 to avoid size limitations
-      const dbPayload = validated.map(toDb);
-      const chunkSize = 50;
-      for (let i = 0; i < dbPayload.length; i += chunkSize) {
-        const chunk = dbPayload.slice(i, i + chunkSize);
-        const { error: insertError } = await supabase
-          .from("body_repair_records")
-          .upsert(chunk, { onConflict: "no_spk" });
-        
-        if (insertError) {
-          logSupabaseError("Bulk upload insert step", insertError);
-          throw insertError;
-        }
-      }
+      // Bulk insert
+      const batchInsert = writeBatch(firebaseDb);
+      validated.forEach(record => {
+         const docRef = doc(firebaseDb, "body_repair_records", record.id);
+         batchInsert.set(docRef, toDb(record));
+      });
+      await batchInsert.commit();
 
       recordsDatabase = validated;
       return res.json({ 
-        message: `Successfully loaded ${validated.length} records into your live Supabase database!`, 
+        message: `Successfully loaded ${validated.length} records into your live Firebase database!`, 
         recordCount: validated.length 
       });
     } catch (e: any) {
-      console.error("Error writing to Supabase during bulk upload, falling back to memory:", e);
+      logFirebaseError("Bulk upload", e);
     }
   }
 
@@ -350,35 +324,26 @@ app.post("/api/records/bulk", async (req, res) => {
 
 app.post("/api/records/reset", async (req, res) => {
   const seeds = generateSeedData();
-  if (supabase) {
+  if (firebaseDb) {
     try {
-      // Clear Supabase completely
-      const { error: deleteError } = await supabase
-        .from("body_repair_records")
-        .delete()
-        .neq("no_spk", "");
-      if (deleteError) {
-        logSupabaseError("Reset clear step", deleteError);
-      }
+      // Clear Firebase completely
+      const existingSnap = await getDocs(collection(firebaseDb, "body_repair_records"));
+      const batchClear = writeBatch(firebaseDb);
+      existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
+      await batchClear.commit().catch(e => logFirebaseError("Clear database", e));
 
       // Insert new seed rows in chunks
-      const dbPayload = seeds.map(toDb);
-      const chunkSize = 50;
-      for (let i = 0; i < dbPayload.length; i += chunkSize) {
-        const chunk = dbPayload.slice(i, i + chunkSize);
-        const { error: insertError } = await supabase
-          .from("body_repair_records")
-          .upsert(chunk, { onConflict: "no_spk" });
-        
-        if (insertError) {
-          logSupabaseError("Reset insert step", insertError);
-          throw insertError;
-        }
-      }
+      const batchInsert = writeBatch(firebaseDb);
+      seeds.forEach(record => {
+         const docRef = doc(firebaseDb, "body_repair_records", record.id);
+         batchInsert.set(docRef, toDb(record));
+      });
+      await batchInsert.commit();
+
       recordsDatabase = seeds;
-      return res.json({ message: "Database reset to professional seed data in Supabase & memory", recordCount: seeds.length, records: seeds });
-    } catch (e) {
-      console.error("Error writing seeds to Supabase, fallback to memory:", e);
+      return res.json({ message: "Database reset to professional seed data in Firebase & memory", recordCount: seeds.length, records: seeds });
+    } catch (e: any) {
+      logFirebaseError("Reset seed", e);
     }
   }
   recordsDatabase = seeds;
@@ -386,20 +351,17 @@ app.post("/api/records/reset", async (req, res) => {
 });
 
 app.post("/api/records/clear", async (req, res) => {
-  if (supabase) {
+  if (firebaseDb) {
     try {
-      const { error } = await supabase
-        .from("body_repair_records")
-        .delete()
-        .neq("no_spk", "");
-      if (error) {
-        logSupabaseError("Clear database", error);
-        throw error;
-      }
+      const existingSnap = await getDocs(collection(firebaseDb, "body_repair_records"));
+      const batchClear = writeBatch(firebaseDb);
+      existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
+      await batchClear.commit();
+      
       recordsDatabase = [];
-      return res.json({ message: "Supabase database cleared successfully", recordCount: 0, records: [] });
-    } catch (e) {
-      console.error("Error clearing Supabase database:", e);
+      return res.json({ message: "Firebase database cleared successfully", recordCount: 0, records: [] });
+    } catch (e: any) {
+      logFirebaseError("Clear database", e);
     }
   }
   recordsDatabase = [];

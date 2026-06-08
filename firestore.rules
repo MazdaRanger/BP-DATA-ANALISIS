@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Basic validation helper
+    function isValidBodyRepairRecord(data) {
+      return data.keys().hasAll(['id', 'tanggal', 'week', 'no_spk', 'asuransi', 'jasa_nett', 'part_material_nett', 'expenses_bahan', 'hpp_part_material', 'spkl', 'jumlah_panel', 'wilayah'])
+          && data.id is string
+          && data.tanggal is string
+          && data.no_spk is string
+          && data.asuransi is string
+          && data.wilayah is string
+          && data.week is number
+          && data.jasa_nett is number
+          && data.part_material_nett is number
+          && data.expenses_bahan is number
+          && data.hpp_part_material is number
+          && data.spkl is number
+          && data.jumlah_panel is number;
+    }
+
+    match /body_repair_records/{documentId} {
+      // Allow read/write for the sandbox simulator without auth
+      allow read: if true;
+      allow create, update: if isValidBodyRepairRecord(request.resource.data);
+      allow delete: if true;
+    }
+  }
+}

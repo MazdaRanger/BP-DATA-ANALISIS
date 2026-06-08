@@ -1,0 +1,30 @@
+{
+  "entities": {
+    "BodyRepairRecord": {
+      "title": "Body Repair Record",
+      "description": "A single body repair transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tanggal": { "type": "string" },
+        "week": { "type": "number" },
+        "noSpk": { "type": "string" },
+        "asuransi": { "type": "string" },
+        "jasaNett": { "type": "number" },
+        "partMaterialNett": { "type": "number" },
+        "expensesBahan": { "type": "number" },
+        "hppPartMaterial": { "type": "number" },
+        "spkl": { "type": "number" },
+        "jumlahPanel": { "type": "number" },
+        "wilayah": { "type": "string" }
+      },
+      "required": ["id", "tanggal", "noSpk"]
+    }
+  },
+  "firestore": {
+    "body_repair_records": {
+      "schema": { "$ref": "#/entities/BodyRepairRecord" },
+      "description": "Collection of all body repair records."
+    }
+  }
+}

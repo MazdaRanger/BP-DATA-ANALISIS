@@ -356,7 +356,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 md:px-8 text-gray-500 text-[10px] flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <p>© 2026 PT Auto Repair Analitika Prima. All rights reserved.</p>
-            <p className="text-gray-600 mt-0.5">Struktur database terstandar Supabase Client CLI & skema SQL migrasi terlampir.</p>
+            <p className="text-gray-600 mt-0.5">Struktur database menggunakan Firebase Cloud Firestore (NoSQL).</p>
           </div>
           <div className="flex items-center gap-4 text-gray-400">
             <a href="mailto:hendrik.mazdatransyogi@gmail.com" className="hover:text-indigo-400 transition flex items-center gap-1.5">

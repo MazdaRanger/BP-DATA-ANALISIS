@@ -100,7 +100,11 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
         // Handle basic excel number dates
         if (typeof dateStr === "number") {
           const dt = XLSX.SSF.parse_date_code(dateStr);
-          dateStr = `${dt.y}-${String(dt.m).padStart(2, "0")}-${String(dt.d).padStart(2, "0")}`;
+          if (dt) {
+            dateStr = `${dt.y}-${String(dt.m).padStart(2, "0")}-${String(dt.d).padStart(2, "0")}`;
+          } else {
+            dateStr = new Date().toISOString().split('T')[0];
+          }
         }
 
         // Parse numerical values safely
@@ -239,19 +243,19 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
         <div className="space-y-1.5 max-w-xl">
           <h4 className="text-sm font-bold text-white flex items-center gap-2">
             {dbStatus?.connected ? (
-              <><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Database Live Supabase Aktif</>
+              <><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Database Live Firebase Aktif</>
             ) : dbStatus?.errorType === "TABLE_MISSING" ? (
-              <><AlertTriangle className="w-4 h-4 text-amber-400" /> Sinkronisasi Supabase Tertunda</>
+              <><AlertTriangle className="w-4 h-4 text-amber-400" /> Sinkronisasi Firebase Tertunda</>
             ) : (
               <><AlertTriangle className="w-4 h-4 text-red-400" /> Mode Memori Lokal Aktif</>
             )}
           </h4>
           <p className="text-[10px] leading-relaxed text-gray-400 font-mono">
             {dbStatus?.connected
-              ? "Sistem sinkronisasi dua arah dengan Supabase cloud aktif. Semua data tersimpan aman secara durable."
+              ? "Sistem sinkronisasi dua arah dengan Firebase Cloud Firestore aktif. Semua data tersimpan aman secara durable."
               : dbStatus?.errorType === "TABLE_MISSING"
-              ? "Tabel database belum terdeteksi. Silakan salin & paste isi file 'supabase-schema.sql' ke dalam SQL Editor Supabase Anda agar sinkron secara permanen. Sementara, data akan disimpan di memori lokal."
-              : "Supabase cloud sedang offline atau tidak terhubung. Dashboard saat ini otomatis berjalan menggunakan penyimpanan memori terisolasi (Memory Sandbox)."}
+              ? "Tabel database atau Firebase Rules belum terdeteksi/aktif. Sementara, data akan disimpan di memori lokal secara otomatis."
+              : "Firebase cloud sedang offline atau membutuhkan hak akses. Dashboard saat ini otomatis berjalan menggunakan penyimpanan memori terisolasi (Memory Sandbox)."}
           </p>
         </div>
         
