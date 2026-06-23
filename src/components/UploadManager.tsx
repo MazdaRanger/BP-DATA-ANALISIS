@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
 import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Download, Database, HelpCircle } from "lucide-react";
-import { BodyRepairRecord } from "../types.js";
+import { BodyRepairRecord } from "../types";
 import { collection, writeBatch, doc, getDocs } from "firebase/firestore";
-import { db } from "../lib/firebaseConfig.js";
+import { db } from "../lib/firebaseConfig";
 
 interface UploadManagerProps {
   onDataLoaded: (records: BodyRepairRecord[], message: string) => void;

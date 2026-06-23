@@ -4,15 +4,15 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { BodyRepairRecord, MetricSummary, ComparativeMatrix } from "../types.js";
-import { filterAndSummarize, generateComparativeMatrix, getMonthName } from "../lib/calculations.js";
-import Dashboard from "../components/Dashboard.js";
-import AnalysisPanel from "../components/AnalysisPanel.js";
-import UploadManager from "../components/UploadManager.js";
-import SettingsPanel from "../components/SettingsPanel.js";
+import { BodyRepairRecord, MetricSummary, ComparativeMatrix } from "../types";
+import { filterAndSummarize, generateComparativeMatrix, getMonthName } from "../lib/calculations";
+import Dashboard from "../components/Dashboard";
+import AnalysisPanel from "../components/AnalysisPanel";
+import UploadManager from "../components/UploadManager";
+import SettingsPanel from "../components/SettingsPanel";
 import { Grid, BrainCircuit, UploadCloud, RefreshCw, BarChart4, Mail, LogOut, Settings, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
-import { useAuth } from "../context/AuthContext.js";
+import { useAuth } from "../context/AuthContext";
 import { collection, getDocs, writeBatch, doc } from "firebase/firestore";
 import { db } from "../lib/firebaseConfig.js";
 

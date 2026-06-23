@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Settings, Save, Calendar as CalendarIcon, Users, Building, Info, AlertTriangle, RefreshCw, Database, Trash2, ShieldAlert, UserPlus, Mail, Lock, Shield } from "lucide-react";
-import { AppSettings, BodyRepairRecord } from "../types.js";
+import { AppSettings, BodyRepairRecord } from "../types";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc, getDocs, collection, writeBatch } from "firebase/firestore";
-import { db } from "../lib/firebaseConfig.js";
+import { db } from "../lib/firebaseConfig";
 
 interface SettingsPanelProps {
   onDatabaseChanged?: () => void;

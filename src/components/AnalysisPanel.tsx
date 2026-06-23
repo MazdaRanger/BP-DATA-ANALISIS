@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { BodyRepairRecord, ProblemAnalysisResponse, LogicTreeNode, AlternativeSolution } from "../types.js";
+import { BodyRepairRecord, ProblemAnalysisResponse, LogicTreeNode, AlternativeSolution } from "../types";
 import { BrainCircuit, GitFork, BarChart3, Grid3X3, ArrowRight, CheckSquare, Sparkles, RefreshCw, Layers, ShieldCheck, HelpCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 

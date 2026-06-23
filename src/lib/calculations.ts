@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BodyRepairRecord, MetricSummary, ComparativeMatrix, ComparisonResult } from "../types.js";
+import { BodyRepairRecord, MetricSummary, ComparativeMatrix, ComparisonResult } from "../types";
 
 export function getMonthName(monthNumber: number): string {
   const months = [

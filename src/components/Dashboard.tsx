@@ -4,7 +4,7 @@
  */
 
 import React from "react";
-import { MetricSummary, ComparativeMatrix } from "../types.js";
+import { MetricSummary, ComparativeMatrix } from "../types";
 import { DollarSign, ShieldAlert, Layers, MapPin, Grid, Percent, TrendingUp, TrendingDown, ArrowUpRight, Award } from "lucide-react";
 import { motion } from "motion/react";
 
