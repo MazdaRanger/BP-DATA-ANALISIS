@@ -1,10 +1,24 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Save, Calendar as CalendarIcon, Users, Building, Info, AlertTriangle, RefreshCw, Database, Trash2, ShieldAlert } from "lucide-react";
-import { AppSettings } from "../types.js";
+import { Settings, Save, Calendar as CalendarIcon, Users, Building, Info, AlertTriangle, RefreshCw, Database, Trash2, ShieldAlert, UserPlus, Mail, Lock, Shield } from "lucide-react";
+import { AppSettings, BodyRepairRecord } from "../types.js";
+import { initializeApp, getApps } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc, getDocs, collection, writeBatch } from "firebase/firestore";
+import { db } from "../lib/firebaseConfig.js";
 
 interface SettingsPanelProps {
   onDatabaseChanged?: () => void;
 }
+
+// Temporary Firebase app to create users without logging out the current super admin
+const firebaseConfig = {
+  projectId: "gen-lang-client-0300801049",
+  appId: "1:818963985156:web:e3641ec4a1e56b0167d651",
+  apiKey: "AIzaSyBit3Kmc2OBoZoH1pguncUKpnkT9F3zhuk",
+  authDomain: "gen-lang-client-0300801049.firebaseapp.com",
+};
+const secondaryApp = getApps().find(app => app.name === "SecondaryApp") || initializeApp(firebaseConfig, "SecondaryApp");
+const secondaryAuth = getAuth(secondaryApp);
 
 export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps) {
   const [settings, setSettings] = useState<AppSettings>({ mechanicsCount: 15, sprayboothsCount: 4, holidays: [] });
@@ -17,6 +31,13 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
   const [dbLoading, setDbLoading] = useState(false);
   const [dbMessage, setDbMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   
+  // Registration states
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState<"user"|"super_admin">("user");
+  const [regLoading, setRegLoading] = useState(false);
+  const [regMessage, setRegMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
   // Date picker state
   const [currentDate, setCurrentDate] = useState(new Date(2026, 5)); // default to June 2026
   
@@ -56,19 +77,47 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
     }
   };
 
+  const handleRegisterUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegLoading(true);
+    setRegMessage(null);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newUserEmail, newUserPassword);
+      const uid = userCredential.user.uid;
+      
+      // Store the user role in firestore main app db
+      await setDoc(doc(db, "users", uid), {
+        email: newUserEmail,
+        role: newUserRole,
+        createdAt: new Date().toISOString()
+      });
+
+      // We sign out the secondary app purely to clean its internal state state
+      await secondaryAuth.signOut();
+      
+      setRegMessage({ type: "success", text: `Pengguna ${newUserEmail} berhasil dibuat sebagai ${newUserRole}!` });
+      setNewUserEmail("");
+      setNewUserPassword("");
+    } catch (err: any) {
+      setRegMessage({ type: "error", text: err.message || "Gagal membuat pengguna baru." });
+    } finally {
+      setRegLoading(false);
+    }
+  };
+
   const handleClearDatabase = async () => {
     setDbLoading(true);
     setDbMessage(null);
     try {
-      const res = await fetch("/api/records/clear", { method: "POST" });
-      if (res.ok) {
-        setDbMessage({ type: "success", text: "Database berhasil dikosongkan secara permanen!" });
-        if (onDatabaseChanged) onDatabaseChanged();
-      } else {
-        throw new Error("Gagal mengosongkan database");
-      }
+      const existingSnap = await getDocs(collection(db, "body_repair_records"));
+      const batchClear = writeBatch(db);
+      existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
+      await batchClear.commit();
+
+      setDbMessage({ type: "success", text: "Database berhasil dikosongkan secara permanen!" });
+      if (onDatabaseChanged) onDatabaseChanged();
     } catch (e: any) {
-      setDbMessage({ type: "error", text: e.message || "Gagal menghubungi server backend." });
+      setDbMessage({ type: "error", text: e.message || "Gagal mengosongkan database." });
     } finally {
       setDbLoading(false);
       setShowClearConfirm(false);
@@ -79,15 +128,66 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
     setDbLoading(true);
     setDbMessage(null);
     try {
-      const res = await fetch("/api/records/reset", { method: "POST" });
-      if (res.ok) {
-        setDbMessage({ type: "success", text: "Data simulasi profesional berhasil dimuat!" });
-        if (onDatabaseChanged) onDatabaseChanged();
-      } else {
-        throw new Error("Gagal memuat data simulasi");
+      // Create some pseudo-random realistic records for last 3 months
+      const seedRecords: Partial<BodyRepairRecord>[] = [];
+      const asuransiList = ["Sinar Mas", "Garda Oto", "Adira", "Personal", "Tokio Marine"];
+      const wilayahList = ["DKI Jakarta", "Jawa Barat", "Banten", "Jawa Tengah", "Jawa Timur"];
+      
+      for (let i = 0; i < 60; i++) {
+         const mOffset = Math.floor(Math.random() * 3); // 0, 1, 2
+         const day = Math.floor(Math.random() * 28) + 1;
+         const d = new Date(2026, 6 - mOffset - 1, day); // 4-5-6 months
+         
+         let week = 1;
+         if (day > 7) week = 2;
+         if (day > 14) week = 3;
+         if (day > 21) week = 4;
+         if (day > 28) week = 5;
+         
+         const isPersonal = Math.random() > 0.8;
+         const baseJasa = 500000 + (Math.random() * 1500000);
+         const parts = baseJasa * 0.4;
+         const expenses = baseJasa * 0.15;
+         const hpp = parts * 0.8;
+
+         seedRecords.push({
+            id: `SEED-${Date.now()}-${i}`,
+            tanggal: d.toISOString().split("T")[0],
+            week,
+            noSpk: `SPK-DEMO-${Math.floor(Math.random()*9000)+1000}`,
+            asuransi: isPersonal ? "Personal" : asuransiList[Math.floor(Math.random() * asuransiList.length)],
+            jasaNett: Math.round(baseJasa),
+            partMaterialNett: Math.round(parts),
+            expensesBahan: Math.round(expenses),
+            hppPartMaterial: Math.round(hpp),
+            spkl: Math.round(baseJasa * (Math.random() > 0.5 ? 0 : 0.05)),
+            jumlahPanel: Math.floor(Math.random() * 5) + 1,
+            wilayah: wilayahList[Math.floor(Math.random() * wilayahList.length)]
+         });
       }
+
+      // Overwrite db
+      const existingSnap = await getDocs(collection(db, "body_repair_records"));
+      const batchClear = writeBatch(db);
+      existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
+      await batchClear.commit().catch(e => console.warn("Clear database failed", e));
+
+      // Batch insert logic using chunking
+      const chunkSize = 400;
+      for (let i = 0; i < seedRecords.length; i += chunkSize) {
+        const batchInsert = writeBatch(db);
+        const chunk = seedRecords.slice(i, i + chunkSize);
+        chunk.forEach(record => {
+           const docRef = doc(db, "body_repair_records", record.id as string);
+           batchInsert.set(docRef, record);
+        });
+        await batchInsert.commit();
+      }
+
+      setDbMessage({ type: "success", text: "Data simulasi profesional berhasil dimuat!" });
+      if (onDatabaseChanged) onDatabaseChanged();
     } catch (e: any) {
-      setDbMessage({ type: "error", text: e.message || "Gagal menghubungi server backend." });
+      setDbMessage({ type: "error", text: e.message || "Gagal menghubungi server database." });
     } finally {
       setDbLoading(false);
       setShowResetConfirm(false);
@@ -257,6 +357,80 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
 
       </div>
 
+      {/* Futuristic User Registration for Super Admin */}
+      <div className="bg-[#111111]/90 border border-indigo-950/40 p-6 rounded-xl space-y-4">
+        <h4 className="text-sm font-bold text-indigo-400 flex items-center gap-2 border-b border-indigo-950/60 pb-3">
+          <UserPlus className="w-4 h-4" /> Manajemen Pengguna Sistem Baru
+        </h4>
+        
+        {regMessage && (
+          <div className={`p-3 rounded-lg text-xs font-mono border ${
+            regMessage.type === "success" 
+              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
+              : "bg-red-500/10 border-red-500/20 text-red-400"
+          }`}>
+            {regMessage.text}
+          </div>
+        )}
+
+        <form onSubmit={handleRegisterUser} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div className="space-y-1.5 md:col-span-1">
+            <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase pl-1">Email</label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input 
+                type="email"
+                required
+                value={newUserEmail}
+                onChange={e => setNewUserEmail(e.target.value)}
+                className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg py-2 pl-9 pr-3 text-white text-xs focus:outline-none focus:border-indigo-500 transition-colors"
+                placeholder="ops@system.com"
+              />
+            </div>
+          </div>
+          
+          <div className="space-y-1.5 md:col-span-1">
+            <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase pl-1">Kata Sandi</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input 
+                type="password"
+                required
+                minLength={6}
+                value={newUserPassword}
+                onChange={e => setNewUserPassword(e.target.value)}
+                className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg py-2 pl-9 pr-3 text-white text-xs focus:outline-none focus:border-indigo-500 transition-colors"
+                placeholder="••••••••"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5 md:col-span-1">
+            <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase pl-1">Akses Role</label>
+            <div className="relative">
+              <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <select 
+                value={newUserRole}
+                onChange={e => setNewUserRole(e.target.value as "user"|"super_admin")}
+                className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg py-2 pl-9 pr-3 text-white text-xs focus:outline-none focus:border-indigo-500 transition-colors appearance-none cursor-pointer"
+              >
+                <option value="user">Standard User</option>
+                <option value="super_admin">Super Admin</option>
+              </select>
+            </div>
+          </div>
+
+          <button 
+            type="submit"
+            disabled={regLoading}
+            className="md:col-span-1 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 border border-indigo-500/30 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {regLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+            Daftarkan User
+          </button>
+        </form>
+      </div>
+
       {/* Zona Risiko Tinggi - Pengelolaan Database */}
       <div id="db-danger-zone" className="bg-[#111111]/90 border border-red-950/40 p-6 rounded-xl space-y-4">
         <h4 className="text-sm font-bold text-red-400 flex items-center gap-2 border-b border-red-950 pb-3">
@@ -380,3 +554,4 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
     </div>
   )
 }
+

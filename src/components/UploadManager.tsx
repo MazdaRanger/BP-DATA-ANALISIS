@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
-import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Sparkles, Database, HelpCircle } from "lucide-react";
-import { BodyRepairRecord, AiMappingConfig } from "../types.js";
+import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Download, Database, HelpCircle } from "lucide-react";
+import { BodyRepairRecord } from "../types.js";
+import { collection, writeBatch, doc, getDocs } from "firebase/firestore";
+import { db } from "../lib/firebaseConfig.js";
 
 interface UploadManagerProps {
   onDataLoaded: (records: BodyRepairRecord[], message: string) => void;
@@ -23,19 +25,42 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
   } | null>(null);
 
   React.useEffect(() => {
+    // Simple check to ensure Firebase is reachable
     const checkStatus = async () => {
       try {
-        const res = await fetch("/api/database-status");
-        if (res.ok) {
-          const status = await res.json();
-          setDbStatus(status);
-        }
-      } catch (e) {
-        console.error("Gagal memeriksa status database", e);
+        await getDocs(collection(db, "body_repair_records"));
+        setDbStatus({
+          connected: true,
+          errorType: null,
+          message: "Koneksi live Firebase sinkron dan aktif!"
+        });
+      } catch (e: any) {
+        setDbStatus({
+          connected: false,
+          errorType: "AUTH_REQUIRED",
+          message: e.message || "Tabel database membutuhkan hak akses. Memory Sandbox fallback aktif."
+        });
       }
     };
     checkStatus();
   }, [currentCount]);
+
+  const downloadGuide = () => {
+    const wb = XLSX.utils.book_new();
+    const columns = [
+      "Tanggal (YYYY-MM-DD)", "NoSPK", "Asuransi", "JasaNett", "PartMaterialNett", 
+      "ExpensesBahan", "HPPPartMaterial", "SPKL", "JumlahPanel", "Wilayah"
+    ];
+    
+    // Create 5 sheets representing 5 weeks
+    for (let w = 1; w <= 5; ++w) {
+      const ws = XLSX.utils.aoa_to_sheet([columns]);
+      XLSX.utils.book_append_sheet(wb, ws, `Minggu ${w}`);
+    }
+
+    XLSX.writeFile(wb, "Data_Master_Guide_Bengkel.xlsx");
+    setSuccessMsg("Excel Guide berhasil diunduh. Silakan isi data berdasarkan template per minggu lalu unggah kembali.");
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -51,18 +76,38 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
       try {
         const bser = evt.target?.result;
         const workbook = XLSX.read(bser, { type: "binary" });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
         
-        // Read raw data from Excel sheet
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+        let allData: any[] = [];
         
-        if (jsonData.length === 0) {
+        // Baca semua sheet
+        workbook.SheetNames.forEach((sheetName) => {
+          // Hanya proses sheet yang sekiranya bernama "Minggu X"
+          if (sheetName.toLowerCase().includes("minggu")) {
+            const weekNumberMatch = sheetName.match(/\d+/);
+            const weekNumber = weekNumberMatch ? parseInt(weekNumberMatch[0], 10) : 1;
+            
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+            
+            // Tambahkan kolom minggu dan gabungkan array
+            const enrichedData = jsonData.map((row: any) => ({ ...row, _week: weekNumber }));
+            allData = allData.concat(enrichedData);
+          }
+        });
+        
+        if (allData.length === 0) {
+          // Fallback if sheets are not named 'Minggu'
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          allData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+          allData = allData.map((row: any) => ({ ...row, _week: 1 }));
+        }
+
+        if (allData.length === 0) {
           throw new Error("File Excel kosong atau format tidak didukung.");
         }
 
-        setFileData(jsonData);
-        setSuccessMsg(`Berhasil membaca file ${file.name} (${jsonData.length} baris data ditemukan). Silakan proses dengan AI Screening.`);
+        setFileData(allData);
+        setSuccessMsg(`Berhasil membaca file ${file.name} (${allData.length} baris data ditemukan). Silakan Proses Sinkronisasi Data.`);
       } catch (err: any) {
         setErrorMsg(`Gagal memuat file: ${err.message || err}`);
       }
@@ -70,81 +115,81 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
     reader.readAsBinaryString(file);
   };
 
-  const processWithAI = async () => {
+  const processData = async () => {
     if (!fileData || fileData.length === 0) return;
     
     setIsProcessing(true);
     setErrorMsg("");
-    setSuccessMsg("Menganalisis format dokumen dengan AI Studio Backend...");
+    setSuccessMsg("Mengekstrak data dari berbagai lembar kerja Mingguan...");
 
     try {
-      // 1. Send sample to AI
-      const sample = fileData.slice(0, 3);
-      const aiRes = await fetch("/api/ai-mapper", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sampleData: sample })
-      });
-
-      if (!aiRes.ok) {
-        const errJson = await aiRes.json();
-        throw new Error(errJson.error || "Gagal menghubungi AI backend.");
-      }
-
-      const mapping: AiMappingConfig = await aiRes.json();
-      setSuccessMsg("Pemetaan AI berhasil. Memformulasikan data...");
-
-      // 2. Map local data to BodyRepairRecord using mapped keys
       const preparedRecords: Partial<BodyRepairRecord>[] = fileData.map((row) => {
-        let dateStr = row[mapping.tanggalKey] || new Date().toISOString().split("T")[0];
-        // Handle basic excel number dates
-        if (typeof dateStr === "number") {
-          const dt = XLSX.SSF.parse_date_code(dateStr);
+        // Find matching keys dynamically since users might tweak the column names slightly
+        const getVal = (possibleKeys: string[], defaultValue: any) => {
+          for (const key of possibleKeys) {
+            const foundKey = Object.keys(row).find(k => k.toLowerCase().replace(/[^a-z]/g, '') === key.toLowerCase().replace(/[^a-z]/g, ''));
+            if (foundKey && row[foundKey] !== "") return row[foundKey];
+          }
+          return defaultValue;
+        };
+
+        const rawDate = getVal(["Tanggal", "Date", "TanggalYYYYMMDD"], new Date().toISOString().split("T")[0]);
+        let dateStr = String(rawDate);
+        if (typeof rawDate === "number") {
+          const dt = XLSX.SSF.parse_date_code(rawDate);
           if (dt) {
             dateStr = `${dt.y}-${String(dt.m).padStart(2, "0")}-${String(dt.d).padStart(2, "0")}`;
-          } else {
-            dateStr = new Date().toISOString().split('T')[0];
           }
         }
 
-        // Parse numerical values safely
         const safeNumber = (val: any) => {
            if (typeof val === "number") return val;
            if (typeof val === "string") return Number(val.replace(/[^0-9.-]+/g,"")) || 0;
            return 0;
         }
 
+        const weekNum = row._week || 1;
+
         return {
-          id: `INV-AI-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          id: `INV-${Date.now()}-${Math.floor(Math.random()*1000)}`,
           tanggal: dateStr,
-          noSpk: String(mapping.noSpkKey && row[mapping.noSpkKey] ? row[mapping.noSpkKey] : `SPK-AI-${Math.floor(Math.random() * 10000)}`),
-          asuransi: mapping.asuransiKey && row[mapping.asuransiKey] ? String(row[mapping.asuransiKey]) : "Personal",
-          jasaNett: mapping.jasaNettKey ? safeNumber(row[mapping.jasaNettKey]) : 0,
-          partMaterialNett: mapping.partMaterialNettKey ? safeNumber(row[mapping.partMaterialNettKey]) : 0,
-          expensesBahan: mapping.expensesBahanKey ? safeNumber(row[mapping.expensesBahanKey]) : 0,
-          hppPartMaterial: mapping.hppPartMaterialKey ? safeNumber(row[mapping.hppPartMaterialKey]) : 0,
-          spkl: mapping.spklKey ? safeNumber(row[mapping.spklKey]) : 0,
-          jumlahPanel: mapping.jumlahPanelKey ? Math.max(1, safeNumber(row[mapping.jumlahPanelKey])) : 1,
-          wilayah: mapping.wilayahKey && row[mapping.wilayahKey] ? String(row[mapping.wilayahKey]) : "Tidak Diketahui"
+          noSpk: String(getVal(["NoSPK", "SPK"], `SPK-GUIDE-${Math.floor(Math.random() * 10000)}`)),
+          asuransi: String(getVal(["Asuransi"], "Personal")),
+          jasaNett: safeNumber(getVal(["JasaNett", "Jasa"], 0)),
+          partMaterialNett: safeNumber(getVal(["PartMaterialNett", "PartMaterial"], 0)),
+          expensesBahan: safeNumber(getVal(["ExpensesBahan", "Expenses"], 0)),
+          hppPartMaterial: safeNumber(getVal(["HPPPartMaterial", "HPP"], 0)),
+          spkl: safeNumber(getVal(["SPKL"], 0)),
+          jumlahPanel: Math.max(1, safeNumber(getVal(["JumlahPanel", "Panel"], 1))),
+          wilayah: String(getVal(["Wilayah", "Area"], "Tidak Diketahui")),
+          week: weekNum,
         };
       });
 
-      // 3. Save to backend to generate calculations and weeks
-      const uploadRes = await fetch("/api/records/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(preparedRecords)
-      });
-      
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(uploadData.error || "Gagal menyimpan database");
+      // Saving to Client Side Firebase
+      const existingSnap = await getDocs(collection(db, "body_repair_records"));
+      const batchClear = writeBatch(db);
+      existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
+      await batchClear.commit().catch(e => console.warn("Clear database failed", e));
 
-      onDataLoaded(preparedRecords as BodyRepairRecord[], uploadData.message);
-      setSuccessMsg(`Siklus AI Selesai. Ekstraksi ${preparedRecords.length} SPK berhasil diverifikasi dan disimpan!`);
+      // Batch insert logic using chunking
+      const chunkSize = 400;
+      for (let i = 0; i < preparedRecords.length; i += chunkSize) {
+        const batchInsert = writeBatch(db);
+        const chunk = preparedRecords.slice(i, i + chunkSize);
+        chunk.forEach(record => {
+           const docRef = doc(db, "body_repair_records", record.id as string);
+           batchInsert.set(docRef, record);
+        });
+        await batchInsert.commit();
+      }
+
+      onDataLoaded(preparedRecords as BodyRepairRecord[], "Berhasil mengunggah data.");
+      setSuccessMsg(`Proses Selesai. ${preparedRecords.length} SPK berhasil diverifikasi dan disimpan dari berbagai minggu!`);
       
     } catch (error: any) {
       console.error(error);
-      setErrorMsg(`AI Screening Gagal: ${error.message}`);
+      setErrorMsg(`Proses Gagal: ${error.message}`);
       setSuccessMsg("");
     } finally {
       setIsProcessing(false);
@@ -158,14 +203,20 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="flex items-center justify-center p-1.5 rounded-lg bg-indigo-950/40 border border-indigo-500/20">
-              <Sparkles className="w-5 h-5 text-indigo-400" />
+              <Download className="w-5 h-5 text-indigo-400" />
             </span>
-            <h3 className="text-sm font-semibold text-white font-sans">AI Screening Document (Excel)</h3>
+            <h3 className="text-sm font-semibold text-white font-sans">Sistem Unggah Manual & Excel Guide</h3>
           </div>
           <p className="text-xs text-gray-400 leading-relaxed font-mono">
-            Tinggalkan proses mapping kolom manual. Sistem AI akan melakukan deteksi otomatis berdasarkan isi kolom master Excel bengkel Anda.
+            Sistem menggunakan format Excel baku yang dibagi per minggu untuk mencegah entri ganda. Unduh guide, isi data, dan unggah.
           </p>
         </div>
+        <button 
+          onClick={downloadGuide}
+          className="shrink-0 px-4 py-2 border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 font-bold text-xs rounded-lg flex items-center gap-2 transition"
+        >
+          <Download className="w-4 h-4" /> Unduh Excel Guide
+        </button>
       </div>
 
       {(errorMsg || successMsg) && (
@@ -183,9 +234,9 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
         {/* Dropzone Area */}
         <div className="bg-[#111111] border border-[#222] p-6 rounded-xl relative flex flex-col items-center justify-center h-64 border-dashed border-2 hover:border-indigo-500/50 transition">
           <Upload className="w-8 h-8 text-indigo-400 mb-4" />
-          <h4 className="text-sm font-bold text-white mb-2">Pilih Master File Excel Anda</h4>
+          <h4 className="text-sm font-bold text-white mb-2">Unggah File Excel yang Terisi</h4>
           <p className="text-[10px] text-gray-500 mb-6 font-mono text-center max-w-xs block leading-relaxed">
-            AI akan mengekstraksi: No SPK, Asuransi, Jasa, Sparepart, Wilayah, SPKL, dan Jumlah Panel secara pintar.
+            Format harus sesuai dengan panduan. Pastikan tiap minggu berada di sheet terpisah untuk menghindari error.
           </p>
           <input
             type="file"
@@ -204,29 +255,29 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
         <div className="bg-[#111111] border border-[#222] p-6 rounded-xl space-y-6 flex flex-col justify-between">
           <div className="space-y-4">
             <h4 className="text-sm font-bold text-white flex items-center gap-2">
-              <Database className="w-4 h-4 text-indigo-400" /> Alur Eksekusi
+              <Database className="w-4 h-4 text-indigo-400" /> Alur Pemrosesan
             </h4>
             <div className="space-y-2">
               <div className="flex items-center gap-3 p-3 rounded bg-[#1a1a1a] border border-[#262626]">
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${fileData ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-[#262626] text-gray-500"}`}>1</div>
-                <span className={`text-xs ${fileData ? "text-emerald-400 font-bold" : "text-gray-400"}`}>File Excel terdeteksi ({fileData?.length || 0} baris)</span>
+                <span className={`text-xs ${fileData ? "text-emerald-400 font-bold" : "text-gray-400"}`}>Validasi format ({fileData?.length || 0} SPK terbaca)</span>
               </div>
               <div className="flex items-center gap-3 p-3 rounded bg-[#1a1a1a] border border-[#262626]">
                 <div className={`w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold ${isProcessing ? "bg-indigo-500/20 text-indigo-400 border-indigo-500/30 animate-pulse" : "bg-[#262626] border-[#262626] text-gray-500"}`}>2</div>
-                <span className={`text-xs ${isProcessing ? "text-indigo-400 font-bold" : "text-gray-400"}`}>Screening AI Backend API</span>
+                <span className={`text-xs ${isProcessing ? "text-indigo-400 font-bold" : "text-gray-400"}`}>Sinkronisasi ke Database Utama</span>
               </div>
             </div>
           </div>
           
           <button
-            onClick={processWithAI}
+            onClick={processData}
             disabled={!fileData || isProcessing}
             className={`w-full p-4 rounded-xl flex items-center justify-center gap-2 font-bold text-sm transition ${!fileData || isProcessing ? "bg-[#171717] border border-[#262626] text-gray-500 cursor-not-allowed" : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)]"}`}
           >
             {isProcessing ? (
-              <><RefreshCw className="w-5 h-5 animate-spin" /> Sedang Analisis...</>
+              <><RefreshCw className="w-5 h-5 animate-spin" /> Sedang Diproses...</>
             ) : (
-              <><Play className="w-5 h-5" /> Mulai AI Screening</>
+              <><Play className="w-5 h-5" /> Mulai Sinkronisasi Data</>
             )}
           </button>
         </div>
