@@ -376,15 +376,52 @@ let appSettings = {
   holidays: [] as string[]
 };
 
-app.get("/api/settings", (req, res) => {
+// Load settings from Firestore on startup if possible
+async function loadSettingsFromDb() {
+  if (firebaseDb) {
+    try {
+      const { getDoc, doc } = await import("firebase/firestore");
+      const settingsDoc = await getDoc(doc(firebaseDb, "system_config", "settings"));
+      if (settingsDoc.exists()) {
+        appSettings = { ...appSettings, ...settingsDoc.data() };
+      }
+    } catch (e) {
+      console.error("Failed to load settings from DB:", e);
+    }
+  }
+}
+loadSettingsFromDb();
+
+app.get("/api/settings", async (req, res) => {
+  if (firebaseDb) {
+    try {
+      const { getDoc, doc } = await import("firebase/firestore");
+      const settingsDoc = await getDoc(doc(firebaseDb, "system_config", "settings"));
+      if (settingsDoc.exists()) {
+        appSettings = { ...appSettings, ...settingsDoc.data() };
+      }
+    } catch (e) {
+      console.error("Failed to fetch settings from DB:", e);
+    }
+  }
   res.json(appSettings);
 });
 
-app.post("/api/settings", (req, res) => {
+app.post("/api/settings", async (req, res) => {
   const { mechanicsCount, sprayboothsCount, holidays } = req.body;
   if (mechanicsCount !== undefined) appSettings.mechanicsCount = Number(mechanicsCount);
   if (sprayboothsCount !== undefined) appSettings.sprayboothsCount = Number(sprayboothsCount);
   if (Array.isArray(holidays)) appSettings.holidays = holidays;
+  
+  if (firebaseDb) {
+    try {
+      const { setDoc, doc } = await import("firebase/firestore");
+      await setDoc(doc(firebaseDb, "system_config", "settings"), appSettings);
+    } catch (e) {
+      console.error("Failed to save settings to DB:", e);
+    }
+  }
+
   res.json({ message: "Settings updated", settings: appSettings });
 });
 
@@ -782,6 +819,9 @@ app.post("/api/analyze", async (req, res) => {
           1. Rumusan Masalah Utama (berdasar margin GP ${grossProfitPercentage.toFixed(1)}% dan pengeluaran Rp ${totalCost.toLocaleString("id-ID")})
           2. Rekomendasi Solusi Berdasarkan Pareto & Logika Matrix. (Kategori pengeluaran tertinggi: HPP=$${totalHppParts}, Bahan=$${totalBahan}, SPKL=$${totalSpkl}).
           3. Tiga Rencana Aksi Konkrit berdasar realitas bengkel body repair Indonesia (misal: pengerjaan panel, asuransi, estimasi).
+          
+          Sebagai referensi tambahan:
+          Bengkel saat ini memiliki kapasitas ${appSettings.mechanicsCount} mekanik aktif dan ${appSettings.sprayboothsCount} oven/spraybooth. Jika beban pekerjaan terlihat tinggi tetapi kapasitas terbatas, sarankan solusi optimasi kapasitas (bottleneck).
 
           Format output: kembalikan JSON dengan format persis di bawah ini demi keamanan parsing:
           {

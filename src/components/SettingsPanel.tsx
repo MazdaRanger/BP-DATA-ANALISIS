@@ -4,19 +4,13 @@ import { AppSettings, BodyRepairRecord } from "../types";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc, getDocs, collection, writeBatch } from "firebase/firestore";
-import { db } from "../lib/firebaseConfig";
+import { db, firebaseConfig } from "../lib/firebaseConfig";
 
 interface SettingsPanelProps {
   onDatabaseChanged?: () => void;
 }
 
 // Temporary Firebase app to create users without logging out the current super admin
-const firebaseConfig = {
-  projectId: "gen-lang-client-0300801049",
-  appId: "1:818963985156:web:e3641ec4a1e56b0167d651",
-  apiKey: "AIzaSyBit3Kmc2OBoZoH1pguncUKpnkT9F3zhuk",
-  authDomain: "gen-lang-client-0300801049.firebaseapp.com",
-};
 const secondaryApp = getApps().find(app => app.name === "SecondaryApp") || initializeApp(firebaseConfig, "SecondaryApp");
 const secondaryAuth = getAuth(secondaryApp);
 

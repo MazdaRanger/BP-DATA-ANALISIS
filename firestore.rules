@@ -28,6 +28,10 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    match /system_config/{documentId} {
+      allow read, write: if true;
+    }
+
     match /body_repair_records/{documentId} {
       // Require auth for reads, but allow writes if super admin OR just general access for testing (we'll limit to auth users)
       allow read: if request.auth != null;
