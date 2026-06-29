@@ -3,7 +3,7 @@ import { Settings, Save, Calendar as CalendarIcon, Users, Building, Info, AlertT
 import { AppSettings, BodyRepairRecord } from "../types";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, getDocs, collection, writeBatch } from "firebase/firestore";
+import { doc, setDoc, getDocs, getDoc, collection, writeBatch } from "firebase/firestore";
 import { db, firebaseConfig } from "../lib/firebaseConfig";
 
 interface SettingsPanelProps {
@@ -38,10 +38,9 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
   const fetchSettings = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/settings");
-      if (res.ok) {
-        const data = await res.json();
-        setSettings(data);
+      const settingsDoc = await getDoc(doc(db, "system_config", "settings"));
+      if (settingsDoc.exists()) {
+        setSettings(settingsDoc.data() as AppSettings);
       }
     } catch (e) {
       console.error(e);
@@ -57,6 +56,8 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
   const saveSettings = async () => {
     setSaving(true);
     try {
+      await setDoc(doc(db, "system_config", "settings"), settings);
+      // Update backend memory as well
       await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

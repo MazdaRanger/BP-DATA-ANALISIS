@@ -6,8 +6,11 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import System from './pages/System';
 
-class ErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: Error | null}> {
-  state = { hasError: false, error: null };
+class ErrorBoundary extends React.Component<{children: ReactNode}, {hasError: boolean, error: Error | null}> {
+  constructor(props: {children: ReactNode}) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
   static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
   componentDidCatch(error: Error) { console.error(error); }
   render() {

@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, setLogLevel } from "firebase/firestore";
+setLogLevel("silent");
 
 export const firebaseConfig = {
   projectId: "gen-lang-client-0300801049",

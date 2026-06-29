@@ -9,7 +9,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs";
 import { initializeApp } from "firebase/app";
-import { initializeFirestore, collection, getDocs, setDoc, deleteDoc, doc, writeBatch } from "firebase/firestore";
+import { initializeFirestore, collection, getDocs, setDoc, deleteDoc, doc, writeBatch, setLogLevel } from "firebase/firestore";
+setLogLevel("silent");
 import { BodyRepairRecord, MetricSummary, ParetoItem, AlternativeSolution, QuantitativeMatrix, ProblemAnalysisResponse, LogicTreeNode } from "./src/types.js";
 
 // Load environment variables
@@ -22,15 +23,35 @@ const PORT = 3000;
 
 // Initialize Firebase Client
 let firebaseDb: any = null;
-try {
-  if (fs.existsSync("./firebase-applet-config.json")) {
-    const config = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf8"));
-    const firebaseApp = initializeApp(config);
-    firebaseDb = initializeFirestore(firebaseApp, { experimentalAutoDetectLongPolling: true }, config.firestoreDatabaseId);
-    console.log("Firebase initialized successfully with project:", config.projectId);
-  } else {
-    console.warn("firebase-applet-config.json not found. Offline memory mode active.");
+
+// Suppress noisy Firestore idle warnings in Node
+const originalConsoleError = console.error;
+console.error = (...args: any[]) => {
+  if (typeof args[0] === 'string' && args[0].includes("GrpcConnection RPC 'Listen' stream") && args[0].includes("CANCELLED")) {
+    return;
   }
+  originalConsoleError(...args);
+};
+
+try {
+  let config;
+  if (fs.existsSync("./firebase-applet-config.json")) {
+    config = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf8"));
+  } else {
+    config = {
+      projectId: "gen-lang-client-0300801049",
+      appId: "1:818963985156:web:e3641ec4a1e56b0167d651",
+      apiKey: "AIzaSyBit3Kmc2OBoZoH1pguncUKpnkT9F3zhuk",
+      authDomain: "gen-lang-client-0300801049.firebaseapp.com",
+      firestoreDatabaseId: "ai-studio-3467babe-2776-4f26-a8fd-61fd0c77f54f",
+      storageBucket: "gen-lang-client-0300801049.firebasestorage.app",
+      messagingSenderId: "818963985156"
+    };
+    console.warn("firebase-applet-config.json not found. Using fallback config for Firebase.");
+  }
+  const firebaseApp = initializeApp(config);
+  firebaseDb = initializeFirestore(firebaseApp, {}, config.firestoreDatabaseId);
+  console.log("Firebase initialized successfully with project:", config.projectId);
 } catch (error) {
   console.error("Failed to initialize Firebase:", error);
 }
@@ -241,6 +262,7 @@ app.get("/api/records", async (req, res) => {
 });
 
 app.post("/api/records/bulk", async (req, res) => {
+  await loadSettingsFromDb();
   const newRecords: Partial<BodyRepairRecord>[] = req.body;
   if (!Array.isArray(newRecords)) {
     return res.status(400).json({ error: "Input must be a JSON array of records" });
@@ -572,6 +594,7 @@ app.post("/api/ai-mapper", async (req, res) => {
 
 // PROBLEM SOLVER ENDPOINT
 app.post("/api/analyze", async (req, res) => {
+  await loadSettingsFromDb();
   const { filteredRecords } = req.body;
   const analysisTarget: BodyRepairRecord[] = (filteredRecords && Array.isArray(filteredRecords) && filteredRecords.length > 0)
     ? filteredRecords 
