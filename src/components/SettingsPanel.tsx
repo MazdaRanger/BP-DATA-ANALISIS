@@ -56,17 +56,25 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
   const saveSettings = async () => {
     setSaving(true);
     try {
+      // Simpan ke Firestore sebagai operasi utama
       await setDoc(doc(db, "system_config", "settings"), settings);
-      // Update backend memory as well
-      await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings)
-      });
+      
+      // Sinkronisasi ke backend server (best-effort, tidak memblokir sukses utama)
+      try {
+        await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(settings)
+        });
+      } catch (syncErr) {
+        // Backend sync gagal tidak memengaruhi penyimpanan utama ke Firestore
+        console.warn("Sinkronisasi backend server gagal (non-kritis):", syncErr);
+      }
+
       alert("Pengaturan Berhasil Disimpan");
     } catch (e) {
       console.error(e);
-      alert("Gagal menyimpan pengaturan");
+      alert("Gagal menyimpan pengaturan ke database. Periksa koneksi dan coba lagi.");
     } finally {
       setSaving(false);
     }

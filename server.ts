@@ -213,6 +213,13 @@ function generateSeedData(): BodyRepairRecord[] {
 // Initial seed starts empty for real-time usage (user can load simulation seed data manually)
 recordsDatabase = [];
 
+// In-memory app settings cache
+let appSettingsCache: { mechanicsCount: number; sprayboothsCount: number; holidays: string[] } = {
+  mechanicsCount: 15,
+  sprayboothsCount: 4,
+  holidays: []
+};
+
 // API REST 
 app.get("/api/database-status", async (req, res) => {
   if (!firebaseDb) {
@@ -261,8 +268,54 @@ app.get("/api/records", async (req, res) => {
   res.json(recordsDatabase);
 });
 
+// GET /api/settings - Ambil pengaturan operasional bengkel
+app.get("/api/settings", async (req, res) => {
+  if (firebaseDb) {
+    try {
+      const { getDoc } = await import("firebase/firestore");
+      const settingsSnap = await getDoc(doc(firebaseDb, "system_config", "settings"));
+      if (settingsSnap.exists()) {
+        const data = settingsSnap.data();
+        appSettingsCache = { ...appSettingsCache, ...data };
+      }
+    } catch (e: any) {
+      console.warn("Gagal membaca settings dari Firestore, menggunakan cache memory:", e.message);
+    }
+  }
+  res.json(appSettingsCache);
+});
+
+// POST /api/settings - Simpan pengaturan operasional bengkel ke memory server
+app.post("/api/settings", async (req, res) => {
+  try {
+    const body = req.body;
+    if (body && typeof body === "object") {
+      if (typeof body.mechanicsCount === "number") appSettingsCache.mechanicsCount = body.mechanicsCount;
+      if (typeof body.sprayboothsCount === "number") appSettingsCache.sprayboothsCount = body.sprayboothsCount;
+      if (Array.isArray(body.holidays)) appSettingsCache.holidays = body.holidays;
+    }
+    console.log(`[Settings] Diperbarui: mekanik=${appSettingsCache.mechanicsCount}, spraybooth=${appSettingsCache.sprayboothsCount}, libur=${appSettingsCache.holidays.length} hari`);
+    res.json({ success: true, settings: appSettingsCache });
+  } catch (e: any) {
+    console.error("POST /api/settings error:", e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.post("/api/records/bulk", async (req, res) => {
-  await loadSettingsFromDb();
+  // Muat settings dari Firestore ke cache jika tersedia
+  if (firebaseDb) {
+    try {
+      const { getDoc } = await import("firebase/firestore");
+      const settingsSnap = await getDoc(doc(firebaseDb, "system_config", "settings"));
+      if (settingsSnap.exists()) {
+        const data = settingsSnap.data();
+        appSettingsCache = { ...appSettingsCache, ...data };
+      }
+    } catch (e) {
+      console.warn("Gagal memuat settings, menggunakan cache default.");
+    }
+  }
   const newRecords: Partial<BodyRepairRecord>[] = req.body;
   if (!Array.isArray(newRecords)) {
     return res.status(400).json({ error: "Input must be a JSON array of records" });
@@ -287,7 +340,7 @@ app.post("/api/records/bulk", async (req, res) => {
     for (let day = 1; day <= dateObj.getDate(); day++) {
       const d = new Date(year, month, day);
       const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      if (d.getDay() !== 0 && !appSettings.holidays.includes(dateStr)) {
+      if (d.getDay() !== 0 && !appSettingsCache.holidays.includes(dateStr)) {
         workingDaysCount++;
       }
     }
