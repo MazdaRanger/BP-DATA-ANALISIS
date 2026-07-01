@@ -6,10 +6,13 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import System from './pages/System';
 
-class ErrorBoundary extends React.Component<{children: ReactNode}, {hasError: boolean, error: Error | null}> {
+class ErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: Error | null}> {
+  state: {hasError: boolean, error: Error | null};
+  props: {children: ReactNode};
   constructor(props: {children: ReactNode}) {
     super(props);
     this.state = { hasError: false, error: null };
+    this.props = props;
   }
   static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
   componentDidCatch(error: Error) { console.error(error); }
