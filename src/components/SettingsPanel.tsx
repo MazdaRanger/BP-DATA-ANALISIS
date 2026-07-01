@@ -40,19 +40,22 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
     try {
       const settingsDoc = await getDoc(doc(db, "system_config", "settings"));
       if (settingsDoc.exists()) {
-        setSettings(settingsDoc.data() as AppSettings);
         const data = settingsDoc.data() as AppSettings;
         setSettings(data);
-        localStorage.setItem("bodyrepair_settings", JSON.stringify(data));
+        // Simpan ke localStorage sebagai cache lokal
+        localStorage.setItem("bp_app_settings", JSON.stringify(data));
       } else {
-        const local = localStorage.getItem("bodyrepair_settings");
-        if (local) setSettings(JSON.parse(local));
+        // Coba muat dari localStorage jika belum ada di Firestore
+        const cached = localStorage.getItem("bp_app_settings");
+        if (cached) setSettings(JSON.parse(cached));
       }
     } catch (e) {
-      console.error(e);
-      console.error("Gagal membaca settings dari Firestore, fallback ke localStorage", e);
-      const local = localStorage.getItem("bodyrepair_settings");
-      if (local) setSettings(JSON.parse(local));
+      console.error("fetchSettings error:", e);
+      // Fallback ke localStorage jika Firestore tidak bisa dijangkau
+      const cached = localStorage.getItem("bp_app_settings");
+      if (cached) {
+        try { setSettings(JSON.parse(cached)); } catch {}
+      }
     } finally {
       setLoading(false);
     }
@@ -65,9 +68,12 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
   const saveSettings = async () => {
     setSaving(true);
     try {
-      // Simpan ke Firestore sebagai operasi utama
+      // Selalu simpan ke localStorage sebagai cache lokal (tidak pernah gagal)
+      localStorage.setItem("bp_app_settings", JSON.stringify(settings));
+
+      // Simpan ke Firestore sebagai operasi utama cloud
       await setDoc(doc(db, "system_config", "settings"), settings);
-      
+
       // Sinkronisasi ke backend server (best-effort, tidak memblokir sukses utama)
       try {
         await fetch("/api/settings", {
@@ -76,20 +82,16 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
           body: JSON.stringify(settings)
         });
       } catch (syncErr) {
-        // Backend sync gagal tidak memengaruhi penyimpanan utama ke Firestore
         console.warn("Sinkronisasi backend server gagal (non-kritis):", syncErr);
       }
 
-      // Save to localStorage as backup
-      localStorage.setItem("bodyrepair_settings", JSON.stringify(settings));
       alert("Pengaturan Berhasil Disimpan");
-    } catch (e) {
     } catch (e: any) {
-      console.error(e);
-      alert("Gagal menyimpan pengaturan ke database. Periksa koneksi dan coba lagi.");
-      // Fallback local storage
-      localStorage.setItem("bodyrepair_settings", JSON.stringify(settings));
-      alert(`Gagal menyimpan ke cloud Firestore.\nError: ${e.message || "Missing or insufficient permissions."}\n\nPengaturan telah disimpan sementara di perangkat ini (localStorage).`);
+      console.error("saveSettings Firestore error:", e);
+      // Meskipun Firestore gagal, settings sudah tersimpan di localStorage
+      // Tampilkan error spesifik untuk diagnosa
+      const errMsg = e?.message || e?.code || String(e);
+      alert(`Gagal menyimpan ke cloud Firestore.\nError: ${errMsg}\n\nPengaturan telah disimpan sementara di perangkat ini (localStorage).`);
     } finally {
       setSaving(false);
     }
@@ -572,4 +574,3 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
     </div>
   )
 }
-
