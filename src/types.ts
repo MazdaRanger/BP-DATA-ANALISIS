@@ -143,3 +143,17 @@ export interface ComparativeMatrix {
   grossProfit: ComparisonResult;
   panelCount: ComparisonResult;
 }
+
+export interface CrcRecord {
+  id: string;
+  tanggal: string; // YYYY-MM-DD
+  week: number;
+  jumlahSpkAsuransi: number;
+  outbondCall: number;
+  unitBooking: number;
+  unitWalkIn: number;
+  outbondAfterService: number;
+  numberPhoneInvalid: number;
+  costumerComplain: number;
+  outbondProspekAsuransi: number;
+}
