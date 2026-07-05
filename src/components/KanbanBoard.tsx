@@ -143,11 +143,11 @@ export default function KanbanBoard() {
         {activeStatuses.map(status => {
           const colCards = records.filter(r => r.status === status);
           return (
-            <div key={status} className="w-72 shrink-0 flex flex-col h-full bg-[#151515] rounded-xl border border-[#2a2a2a] snap-start">
+            <div key={status} className="w-72 shrink-0 flex flex-col h-full bg-[#151515]/60 backdrop-blur-md rounded-xl border border-white/5 snap-start shadow-[0_8px_32px_0_rgba(0,0,0,0.3)]">
               {/* Column Header */}
-              <div className="p-3 border-b border-[#2a2a2a] bg-[#1a1a1a] rounded-t-xl flex justify-between items-center shrink-0">
-                <h3 className="font-bold text-sm text-gray-200">{status}</h3>
-                <span className="text-[10px] font-mono bg-[#222] px-2 py-0.5 rounded text-gray-400">{colCards.length}</span>
+              <div className="p-3 border-b border-white/10 bg-gradient-to-r from-white/5 to-transparent rounded-t-xl flex justify-between items-center shrink-0">
+                <h3 className="font-bold text-sm text-gray-200 drop-shadow-md">{status}</h3>
+                <span className="text-[10px] font-mono bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded text-gray-300 border border-white/10 shadow-inner">{colCards.length}</span>
               </div>
               
               {/* Cards Container */}
@@ -158,30 +158,30 @@ export default function KanbanBoard() {
                   const isLast = currentIndex === ALL_STATUSES.length - 1;
 
                   return (
-                    <div key={card.id} className="bg-[#1e1e1e] border border-[#333] rounded-lg p-3 group relative hover:border-indigo-500/50 transition">
-                      <button onClick={() => deleteCard(card.id)} className="absolute top-2 right-2 text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition">
+                    <div key={card.id} className="bg-white/5 backdrop-blur-md border border-white/10 shadow-[0_4px_16px_0_rgba(0,0,0,0.2)] rounded-xl p-3 group relative hover:border-indigo-500/50 hover:bg-white/10 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_0_rgba(79,70,229,0.15)] transition-all duration-300">
+                      <button onClick={() => deleteCard(card.id)} className="absolute top-2 right-2 p-1 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 rounded-md opacity-0 group-hover:opacity-100 transition shadow-sm backdrop-blur-sm border border-red-500/20">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                       
-                      <div className="text-xs font-bold text-indigo-400 mb-1">{card.noSpk}</div>
-                      <div className="text-sm font-semibold text-white mb-2">{card.nopol} - {card.kendaraan}</div>
-                      <div className="text-[10px] font-mono text-gray-400 bg-[#111] inline-block px-2 py-1 rounded border border-[#222]">
+                      <div className="text-[10px] font-bold text-indigo-400 tracking-wider mb-0.5 opacity-90">{card.noSpk}</div>
+                      <div className="text-sm font-semibold text-gray-100 mb-2 drop-shadow-sm">{card.nopol} <span className="text-gray-500 font-normal mx-1">|</span> {card.kendaraan}</div>
+                      <div className="text-[10px] font-mono text-indigo-300 bg-indigo-500/10 inline-block px-2 py-1 rounded border border-indigo-500/20 backdrop-blur-sm shadow-inner">
                         {card.asuransi}
                       </div>
 
-                      <div className="mt-4 flex justify-between items-center border-t border-[#333] pt-2">
+                      <div className="mt-4 flex justify-between items-center border-t border-white/10 pt-3">
                         <button 
                           onClick={() => moveCard(card.id, card.status, "LEFT")}
                           disabled={isFirst}
-                          className="p-1 text-gray-500 hover:text-white disabled:opacity-30 transition"
+                          className="p-1.5 text-gray-400 bg-black/20 rounded-md hover:text-white hover:bg-black/40 border border-white/5 disabled:opacity-30 transition"
                         >
                           <ChevronLeft className="w-4 h-4" />
                         </button>
-                        <span className="text-[9px] text-gray-500">{new Date(card.updatedAt).toLocaleDateString('id-ID')}</span>
+                        <span className="text-[9px] text-gray-400/70 font-mono tracking-wider">{new Date(card.updatedAt).toLocaleDateString('id-ID')}</span>
                         <button 
                           onClick={() => moveCard(card.id, card.status, "RIGHT")}
                           disabled={isLast}
-                          className="p-1 text-gray-500 hover:text-white disabled:opacity-30 transition"
+                          className="p-1.5 text-gray-400 bg-black/20 rounded-md hover:text-white hover:bg-black/40 border border-white/5 disabled:opacity-30 transition"
                         >
                           <ChevronRight className="w-4 h-4" />
                         </button>
