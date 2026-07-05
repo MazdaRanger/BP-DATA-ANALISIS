@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
-import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Database, Calendar, PlusCircle, BrainCircuit } from "lucide-react";
+import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Database, Calendar, PlusCircle, BrainCircuit, Download } from "lucide-react";
 import { collection, doc, setDoc, writeBatch } from "firebase/firestore";
 import { db } from "../lib/firebaseConfig";
 
@@ -62,6 +62,20 @@ export default function UploadManager({ onDatabaseChanged, currentCount }: Uploa
     } finally {
       setIsSavingManual(false);
     }
+  };
+
+  const downloadTemplate = () => {
+    const wb = XLSX.utils.book_new();
+    const columns = ["Nopol", "Alamat", "Pelanggan atau Asuransi"];
+    const sampleData = [
+      ["B 1234 ROS", "Jl. Sudirman No 1", "Asuransi Garda Oto"],
+      ["", "Jakarta Selatan", "Bapak Budi (Personal)"],
+      ["D 5678 XX", "", "Adira"]
+    ];
+    const ws = XLSX.utils.aoa_to_sheet([columns, ...sampleData]);
+    XLSX.utils.book_append_sheet(wb, ws, "Data_Mapping");
+    XLSX.writeFile(wb, "Template_Mapping_AI.xlsx");
+    setAiMsg({ type: "success", text: "Template Excel berhasil diunduh!" });
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -206,33 +220,33 @@ export default function UploadManager({ onDatabaseChanged, currentCount }: Uploa
 
             <div className="space-y-1">
               <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Jasa Nett</label>
-              <input type="number" required value={manualJasa || ""} onChange={e => setManualJasa(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+              <input type="number" required value={manualJasa.toString()} onChange={e => setManualJasa(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
             </div>
 
             <div className="space-y-1">
               <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Part & Material Nett</label>
-              <input type="number" required value={manualPart || ""} onChange={e => setManualPart(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+              <input type="number" required value={manualPart.toString()} onChange={e => setManualPart(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
             </div>
 
             <div className="space-y-1">
               <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Expenses Bahan</label>
-              <input type="number" required value={manualExpenses || ""} onChange={e => setManualExpenses(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+              <input type="number" required value={manualExpenses.toString()} onChange={e => setManualExpenses(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">HPP Part</label>
-                <input type="number" required value={manualHpp || ""} onChange={e => setManualHpp(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+                <input type="number" required value={manualHpp.toString()} onChange={e => setManualHpp(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">SPKL</label>
-                <input type="number" required value={manualSpkl || ""} onChange={e => setManualSpkl(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+                <input type="number" required value={manualSpkl.toString()} onChange={e => setManualSpkl(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
               </div>
             </div>
 
             <div className="space-y-1">
               <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Jumlah Total Panel</label>
-              <input type="number" required value={manualPanel || ""} onChange={e => setManualPanel(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+              <input type="number" required value={manualPanel.toString()} onChange={e => setManualPanel(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
             </div>
 
             <button type="submit" disabled={isSavingManual} className="w-full mt-4 py-3 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 disabled:opacity-50">
@@ -249,6 +263,13 @@ export default function UploadManager({ onDatabaseChanged, currentCount }: Uploa
                <BrainCircuit className="w-4 h-4 text-indigo-400" />
                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Pemetaan Wilayah & Asuransi</h4>
             </div>
+
+            <button 
+              onClick={downloadTemplate}
+              className="absolute top-3 right-3 px-3 py-1.5 bg-indigo-900/30 hover:bg-indigo-900/60 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-lg flex items-center gap-1.5 transition"
+            >
+              <Download className="w-3 h-3" /> Unduh Template
+            </button>
 
             <div className="flex flex-col items-center text-center mt-6">
               <Upload className="w-8 h-8 text-indigo-400 mb-4" />
