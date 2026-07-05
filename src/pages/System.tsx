@@ -4,15 +4,16 @@
  */
 
 import React, { useState, useEffect, useMemo } from "react";
-import { BodyRepairRecord, MetricSummary, ComparativeMatrix } from "../types";
+import { BodyRepairRecord, MetricSummary, ComparativeMatrix, CrcRecord } from "../types";
 import { filterAndSummarize, generateComparativeMatrix, getMonthName } from "../lib/calculations";
 import Dashboard from "../components/Dashboard";
+import DashboardCrc from "../components/DashboardCrc";
 import AnalysisPanel from "../components/AnalysisPanel";
 import UploadManager from "../components/UploadManager";
 import SettingsPanel from "../components/SettingsPanel";
 import DataManager from "../components/DataManager";
 import KanbanBoard from "../components/KanbanBoard";
-import { Grid, BrainCircuit, UploadCloud, RefreshCw, BarChart4, Mail, LogOut, Settings, Calendar, DatabaseBackup, LayoutDashboard } from "lucide-react";
+import { Grid, BrainCircuit, UploadCloud, RefreshCw, BarChart4, Mail, LogOut, Settings, Calendar, DatabaseBackup, LayoutDashboard, PhoneCall } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { collection, getDocs, writeBatch, doc } from "firebase/firestore";
 import { db } from "../lib/firebaseConfig.js";
@@ -21,8 +22,12 @@ export default function System() {
   const { user, role, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<"dashboard" | "analysis" | "upload" | "settings" | "data_manager" | "kanban">("dashboard");
   const [records, setRecords] = useState<BodyRepairRecord[]>([]);
+  const [crcRecords, setCrcRecords] = useState<CrcRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorHeader, setErrorHeader] = useState("");
+  
+  // Dashboard Tabs
+  const [dashboardTab, setDashboardTab] = useState<"MAIN" | "CRC">("MAIN");
 
   // Filters State
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
@@ -35,6 +40,7 @@ export default function System() {
     setErrorHeader("");
     try {
       const snap = await getDocs(collection(db, "body_repair_records"));
+      const crcSnap = await getDocs(collection(db, "crc_records"));
       // Normalize data: handle both camelCase (frontend writes) and snake_case (server writes)
       const data = snap.docs.map(docSnap => {
         const raw = docSnap.data();
@@ -64,6 +70,26 @@ export default function System() {
           setSelectedMonth(rDate.getMonth() + 1);
         }
       }
+
+      const crcData = crcSnap.docs.map(docSnap => {
+        const raw = docSnap.data();
+        return {
+          id: raw.id || docSnap.id,
+          tanggal: raw.tanggal,
+          week: Number(raw.week),
+          jumlahSpkAsuransi: Number(raw.jumlahSpkAsuransi ?? 0),
+          outbondCall: Number(raw.outbondCall ?? 0),
+          unitBooking: Number(raw.unitBooking ?? 0),
+          unitWalkIn: Number(raw.unitWalkIn ?? 0),
+          outbondAfterService: Number(raw.outbondAfterService ?? 0),
+          numberPhoneInvalid: Number(raw.numberPhoneInvalid ?? 0),
+          costumerComplain: Number(raw.costumerComplain ?? 0),
+          outbondProspekAsuransi: Number(raw.outbondProspekAsuransi ?? 0),
+        } as CrcRecord;
+      });
+      crcData.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
+      setCrcRecords(crcData);
+
     } catch (err: any) {
       console.error(err);
       setErrorHeader(err.message || "Gagal tersambung ke server database memori.");
@@ -268,7 +294,16 @@ export default function System() {
       .sort((a, b) => b.panels - a.panels);
   }, [records, selectedYear, selectedMonth, activeWeek]);
 
-  // Current active records filtered list
+  // Filter CRC records based on global filters
+  const activeFilteredCrcRecordsList = useMemo(() => {
+    return crcRecords.filter((r) => {
+      const d = new Date(r.tanggal);
+      const mMatch = selectedMonth === 0 ? true : (d.getMonth() + 1) === selectedMonth;
+      return d.getFullYear() === selectedYear && mMatch && (activeWeek === "ALL" ? true : r.week === activeWeek);
+    });
+  }, [crcRecords, selectedYear, selectedMonth, activeWeek]);
+
+  // Derived list of ALL active mapped records
   const activeFilteredRecordsList = useMemo(() => {
     return records.filter((r) => {
       const rDate = new Date(r.tanggal);
@@ -449,17 +484,45 @@ export default function System() {
         ) : (
           <div>
             {activeTab === "dashboard" && (
-              <Dashboard
-                summary={currentStats}
-                m2m={m2mComparisonMatrix}
-                y2y={y2yComparisonMatrix}
-                weeklyTrend={weeklyTrend}
-                insuranceStats={insuranceStats}
-                activeWeek={activeWeek}
-                setActiveWeek={setActiveWeek}
-                activeMonthName={selectedMonth === 0 ? "Akumulatif" : getMonthName(selectedMonth)}
-                activeYear={selectedYear}
-              />
+              <div className="space-y-6">
+                <div className="flex bg-[#111] p-1 rounded-lg border border-[#222] w-fit">
+                  <button
+                    onClick={() => setDashboardTab("MAIN")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-bold transition ${dashboardTab === "MAIN" ? "bg-indigo-600 text-white shadow-lg" : "text-gray-400 hover:text-white"}`}
+                  >
+                    <Grid className="w-4 h-4" /> Produksi & Keuangan
+                  </button>
+                  <button
+                    onClick={() => setDashboardTab("CRC")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-bold transition ${dashboardTab === "CRC" ? "bg-emerald-600 text-white shadow-lg" : "text-gray-400 hover:text-white"}`}
+                  >
+                    <PhoneCall className="w-4 h-4" /> KPI CRC
+                  </button>
+                </div>
+                
+                {dashboardTab === "MAIN" && (
+                  <Dashboard
+                    summary={currentStats}
+                    m2m={m2mComparisonMatrix}
+                    y2y={y2yComparisonMatrix}
+                    weeklyTrend={weeklyTrend}
+                    insuranceStats={insuranceStats}
+                    activeWeek={activeWeek}
+                    setActiveWeek={setActiveWeek}
+                    activeMonthName={selectedMonth === 0 ? "Akumulatif" : getMonthName(selectedMonth)}
+                    activeYear={selectedYear}
+                  />
+                )}
+
+                {dashboardTab === "CRC" && (
+                  <DashboardCrc
+                    crcRecords={activeFilteredCrcRecordsList}
+                    activeMonthName={selectedMonth === 0 ? "Akumulatif" : getMonthName(selectedMonth)}
+                    activeYear={selectedYear}
+                    activeWeek={activeWeek}
+                  />
+                )}
+              </div>
             )}
 
             {activeTab === "analysis" && (
