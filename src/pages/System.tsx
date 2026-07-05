@@ -23,8 +23,8 @@ export default function System() {
   const [errorHeader, setErrorHeader] = useState("");
 
   // Filters State
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
-  const [selectedMonth, setSelectedMonth] = useState<number>(6); // Default: Juni
+  const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth() + 1); // 1-indexed
   const [activeWeek, setActiveWeek] = useState<number | "ALL">("ALL");
 
   // Fetch records from Client Side Firebase instead of Backend
@@ -54,6 +54,14 @@ export default function System() {
       // Sort desc by tanggal
       data.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
       setRecords(data);
+      if (data.length > 0) {
+        const latestRecord = data[0];
+        const rDate = new Date(latestRecord.tanggal);
+        if (!isNaN(rDate.getTime())) {
+          setSelectedYear(rDate.getFullYear());
+          setSelectedMonth(rDate.getMonth() + 1);
+        }
+      }
     } catch (err: any) {
       console.error(err);
       setErrorHeader(err.message || "Gagal tersambung ke server database memori.");
@@ -169,26 +177,26 @@ export default function System() {
   // Calculate distinct available Years & Months in the dataset to drive dropdowns dynamically
   const availableYears = useMemo(() => {
     const years = new Set<number>();
+    const currentYear = new Date().getFullYear();
+    const startYear = 2020;
+    // Provide a generous buffer of 20 years into the future
+    const endYear = Math.max(currentYear + 20, 2045);
+    for (let y = startYear; y <= endYear; y++) {
+      years.add(y);
+    }
     for (const r of records) {
       const d = new Date(r.tanggal);
       if (!isNaN(d.getTime())) {
         years.add(d.getFullYear());
       }
     }
-    return years.size > 0 ? Array.from(years).sort((a, b) => b - a) : [2026, 2025];
+    return Array.from(years).sort((a, b) => b - a);
   }, [records]);
 
   const availableMonths = useMemo(() => {
-    const months = new Set<number>();
-    for (const r of records) {
-      const d = new Date(r.tanggal);
-      if (!isNaN(d.getTime()) && d.getFullYear() === selectedYear) {
-        months.add(d.getMonth() + 1); // 1-indexed
-      }
-    }
-    const sorted = Array.from(months).sort((a, b) => a - b);
-    return sorted.length > 0 ? sorted : [4, 5, 6]; 
-  }, [records, selectedYear]);
+    // Return all 12 months (Januari s.d. Desember) to support full year range selection
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  }, []);
 
   // Compute stats based on chosen filter parameters
   const currentStats = useMemo(() => {
