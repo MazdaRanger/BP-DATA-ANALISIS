@@ -10,14 +10,16 @@ import Dashboard from "../components/Dashboard";
 import AnalysisPanel from "../components/AnalysisPanel";
 import UploadManager from "../components/UploadManager";
 import SettingsPanel from "../components/SettingsPanel";
-import { Grid, BrainCircuit, UploadCloud, RefreshCw, BarChart4, Mail, LogOut, Settings, Calendar } from "lucide-react";
+import DataManager from "../components/DataManager";
+import KanbanBoard from "../components/KanbanBoard";
+import { Grid, BrainCircuit, UploadCloud, RefreshCw, BarChart4, Mail, LogOut, Settings, Calendar, DatabaseBackup, LayoutDashboard } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { collection, getDocs, writeBatch, doc } from "firebase/firestore";
 import { db } from "../lib/firebaseConfig.js";
 
 export default function System() {
   const { user, role, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<"dashboard" | "analysis" | "upload" | "settings">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "analysis" | "upload" | "settings" | "data_manager" | "kanban">("dashboard");
   const [records, setRecords] = useState<BodyRepairRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorHeader, setErrorHeader] = useState("");
@@ -279,8 +281,10 @@ export default function System() {
 
   const navTabs = [
     { id: "dashboard", label: "Dashboard", icon: Grid },
+    { id: "kanban", label: "Kanban Outstanding", icon: LayoutDashboard },
     { id: "analysis", label: "Analisis Masalah", icon: BrainCircuit },
-    { id: "upload", label: "Unggah Database", icon: UploadCloud }
+    { id: "upload", label: "Unggah Database", icon: UploadCloud },
+    { id: "data_manager", label: "Manajemen Data", icon: DatabaseBackup }
   ];
 
   if (role === 'super_admin') {
@@ -474,6 +478,10 @@ export default function System() {
             )}
 
             {activeTab === "settings" && <SettingsPanel onDatabaseChanged={fetchRecords} />}
+
+            {activeTab === "data_manager" && <DataManager />}
+
+            {activeTab === "kanban" && <KanbanBoard />}
           </div>
         )}
 

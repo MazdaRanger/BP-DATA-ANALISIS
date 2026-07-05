@@ -9,6 +9,31 @@ export interface AppSettings {
   holidays: string[]; // YYYY-MM-DD
 }
 
+export type KanbanStatus = 
+  | "Penerimaan SPK"
+  | "Estimasi Biaya"
+  | "Banding Asuransi"
+  | "Bongkar"
+  | "Las Ketok"
+  | "Dempul"
+  | "Antri Cat (Mixing)"
+  | "Cat"
+  | "Poles"
+  | "Pemasangan"
+  | "Finishing & QC"
+  | "Kendaraan Siap Di Ambil"
+  | "Kendaraan Keluar Rawat Jalan";
+
+export interface KanbanRecord {
+  id: string;
+  noSpk: string;
+  nopol: string;
+  kendaraan: string;
+  asuransi: string;
+  status: KanbanStatus;
+  updatedAt: string;
+}
+
 export interface AiMappingConfig {
   tanggalKey: string;
   noSpkKey: string;
