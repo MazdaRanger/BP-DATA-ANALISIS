@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { BodyRepairRecord, ProblemAnalysisResponse, LogicTreeNode, AlternativeSolution } from "../types";
 import { BrainCircuit, GitFork, BarChart3, Grid3X3, ArrowRight, CheckSquare, Sparkles, RefreshCw, Layers, ShieldCheck, HelpCircle } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 
 interface AnalysisPanelProps {
   filteredRecords: BodyRepairRecord[];
@@ -20,7 +20,7 @@ export default function AnalysisPanel({ filteredRecords, activeMonthName, active
   const [activeTab, setActiveTab] = useState<"tree" | "pareto" | "matrix">("tree");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const triggerAnalysis = async () => {
+  const triggerAnalysis = useCallback(async () => {
     setLoading(true);
     setErrorMsg("");
     try {
@@ -38,12 +38,12 @@ export default function AnalysisPanel({ filteredRecords, activeMonthName, active
     } finally {
       setLoading(false);
     }
-  };
+  }, [filteredRecords]);
 
   // Run analysis when filteredRecords change
   useEffect(() => {
     triggerAnalysis();
-  }, [filteredRecords]);
+  }, [triggerAnalysis]);
 
   if (loading && !analysis) {
     return (
@@ -57,7 +57,7 @@ export default function AnalysisPanel({ filteredRecords, activeMonthName, active
 
   if (errorMsg) {
     return (
-      <div className="p-6 bg-[#111111] border border-[#222] border border-red-500/20 rounded-xl space-y-4">
+      <div className="p-6 bg-[#111111] border border-red-500/20 rounded-xl space-y-4">
         <p className="text-xs font-mono text-red-400">Error: {errorMsg}</p>
         <button
           onClick={triggerAnalysis}

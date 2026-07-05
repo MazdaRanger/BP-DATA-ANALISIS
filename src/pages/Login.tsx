@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../lib/firebaseConfig';
 import { Activity, Lock, Mail, ChevronRight } from 'lucide-react';

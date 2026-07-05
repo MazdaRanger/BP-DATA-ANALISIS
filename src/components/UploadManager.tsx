@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
-import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Download, Database, HelpCircle } from "lucide-react";
+import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Download, Database } from "lucide-react";
 import { BodyRepairRecord } from "../types";
 import { collection, writeBatch, doc, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebaseConfig";
@@ -179,7 +179,21 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
         const chunk = preparedRecords.slice(i, i + chunkSize);
         chunk.forEach(record => {
            const docRef = doc(db, "body_repair_records", record.id as string);
-           batchInsert.set(docRef, record);
+           // Write as snake_case to comply with Firestore Rules validation
+           batchInsert.set(docRef, {
+             id: record.id,
+             tanggal: record.tanggal,
+             week: record.week,
+             no_spk: record.noSpk,
+             asuransi: record.asuransi,
+             jasa_nett: record.jasaNett,
+             part_material_nett: record.partMaterialNett,
+             expenses_bahan: record.expensesBahan,
+             hpp_part_material: record.hppPartMaterial,
+             spkl: record.spkl,
+             jumlah_panel: record.jumlahPanel,
+             wilayah: record.wilayah,
+           });
         });
         await batchInsert.commit();
       }

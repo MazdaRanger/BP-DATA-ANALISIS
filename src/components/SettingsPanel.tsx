@@ -4,7 +4,7 @@ import { AppSettings, BodyRepairRecord } from "../types";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc, getDocs, getDoc, collection, writeBatch } from "firebase/firestore";
-import { db, firebaseConfig } from "../lib/firebaseConfig";
+import { db, firebaseConfig, auth } from "../lib/firebaseConfig";
 
 interface SettingsPanelProps {
   onDatabaseChanged?: () => void;
@@ -35,15 +35,110 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
   // Date picker state
   const [currentDate, setCurrentDate] = useState(new Date(2026, 5)); // default to June 2026
   
+  const FIRESTORE_DB_ID = firebaseConfig.firestoreDatabaseId;
+  const FIRESTORE_PROJECT = firebaseConfig.projectId;
+
+  // Helper: dapatkan ID token Firebase Auth user aktif
+  const getIdToken = async (): Promise<string | null> => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return null;
+    try {
+      return await currentUser.getIdToken(false);
+    } catch {
+      return null;
+    }
+  };
+
+  // Helper: simpan ke Firestore via REST API dengan auth token
+  const saveToFirestoreREST = async (data: AppSettings, idToken: string | null) => {
+    const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/${FIRESTORE_DB_ID}/documents/system_config/settings`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (idToken) headers["Authorization"] = `Bearer ${idToken}`;
+
+    const firestoreFields = {
+      fields: {
+        mechanicsCount: { integerValue: String(data.mechanicsCount) },
+        sprayboothsCount: { integerValue: String(data.sprayboothsCount) },
+        holidays: { arrayValue: { values: data.holidays.map(h => ({ stringValue: h })) } }
+      }
+    };
+
+    const resp = await fetch(url + "?currentDocument.exists=true", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify(firestoreFields)
+    });
+
+    if (!resp.ok && resp.status === 404) {
+      // Dokumen belum ada, buat baru dengan PUT
+      const createResp = await fetch(url, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(firestoreFields)
+      });
+      if (!createResp.ok) {
+        const errBody = await createResp.text();
+        throw new Error(`Firestore REST API error ${createResp.status}: ${errBody}`);
+      }
+    } else if (!resp.ok) {
+      const errBody = await resp.text();
+      throw new Error(`Firestore REST API error ${resp.status}: ${errBody}`);
+    }
+  };
+
+  // Helper: baca dari Firestore via REST API
+  const fetchFromFirestoreREST = async (idToken: string | null): Promise<AppSettings | null> => {
+    const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/${FIRESTORE_DB_ID}/documents/system_config/settings`;
+    const headers: Record<string, string> = {};
+    if (idToken) headers["Authorization"] = `Bearer ${idToken}`;
+
+    const resp = await fetch(url, { headers });
+    if (resp.status === 404) return null;
+    if (!resp.ok) {
+      console.warn("fetchFromFirestoreREST error:", resp.status);
+      return null;
+    }
+    const json = await resp.json();
+    const f = json.fields || {};
+    return {
+      mechanicsCount: Number(f.mechanicsCount?.integerValue ?? f.mechanicsCount?.doubleValue ?? 15),
+      sprayboothsCount: Number(f.sprayboothsCount?.integerValue ?? f.sprayboothsCount?.doubleValue ?? 4),
+      holidays: (f.holidays?.arrayValue?.values || []).map((v: any) => v.stringValue).filter(Boolean)
+    };
+  };
+
   const fetchSettings = async () => {
     setLoading(true);
     try {
-      const settingsDoc = await getDoc(doc(db, "system_config", "settings"));
-      if (settingsDoc.exists()) {
-        setSettings(settingsDoc.data() as AppSettings);
+      const idToken = await getIdToken();
+      // Coba dulu via Firestore REST API
+      const data = await fetchFromFirestoreREST(idToken);
+      if (data) {
+        setSettings(data);
+        localStorage.setItem("bp_app_settings", JSON.stringify(data));
+      } else {
+        // Fallback via Firestore SDK
+        try {
+          const settingsDoc = await getDoc(doc(db, "system_config", "settings"));
+          if (settingsDoc.exists()) {
+            const sdkData = settingsDoc.data() as AppSettings;
+            setSettings(sdkData);
+            localStorage.setItem("bp_app_settings", JSON.stringify(sdkData));
+          }
+        } catch (sdkErr) {
+          // Fallback ke localStorage
+          const cached = localStorage.getItem("bp_app_settings");
+          if (cached) {
+            try { setSettings(JSON.parse(cached)); } catch {}
+          }
+        }
       }
     } catch (e) {
-      console.error(e);
+      console.error("fetchSettings error:", e);
+      const cached = localStorage.getItem("bp_app_settings");
+      if (cached) {
+        try { setSettings(JSON.parse(cached)); } catch {}
+      }
     } finally {
       setLoading(false);
     }
@@ -56,10 +151,15 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
   const saveSettings = async () => {
     setSaving(true);
     try {
-      // Simpan ke Firestore sebagai operasi utama
-      await setDoc(doc(db, "system_config", "settings"), settings);
-      
-      // Sinkronisasi ke backend server (best-effort, tidak memblokir sukses utama)
+      // Selalu simpan ke localStorage sebagai cache lokal
+      localStorage.setItem("bp_app_settings", JSON.stringify(settings));
+
+      const idToken = await getIdToken();
+
+      // Simpan via Firestore REST API (lebih reliabel, mendukung named database)
+      await saveToFirestoreREST(settings, idToken);
+
+      // Sinkronisasi ke backend server (best-effort)
       try {
         await fetch("/api/settings", {
           method: "POST",
@@ -67,14 +167,15 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
           body: JSON.stringify(settings)
         });
       } catch (syncErr) {
-        // Backend sync gagal tidak memengaruhi penyimpanan utama ke Firestore
         console.warn("Sinkronisasi backend server gagal (non-kritis):", syncErr);
       }
 
       alert("Pengaturan Berhasil Disimpan");
-    } catch (e) {
-      console.error(e);
-      alert("Gagal menyimpan pengaturan ke database. Periksa koneksi dan coba lagi.");
+    } catch (e: any) {
+      console.error("saveSettings error:", e);
+      const errMsg = e?.message || e?.code || String(e);
+      // Meskipun cloud gagal, settings sudah tersimpan di localStorage
+      alert(`Gagal menyimpan ke cloud.\nError: ${errMsg}\n\nPengaturan disimpan sementara di perangkat ini.`);
     } finally {
       setSaving(false);
     }
@@ -182,7 +283,21 @@ export default function SettingsPanel({ onDatabaseChanged }: SettingsPanelProps)
         const chunk = seedRecords.slice(i, i + chunkSize);
         chunk.forEach(record => {
            const docRef = doc(db, "body_repair_records", record.id as string);
-           batchInsert.set(docRef, record);
+           // Write as snake_case to comply with Firestore Rules validation
+           batchInsert.set(docRef, {
+             id: record.id,
+             tanggal: record.tanggal,
+             week: record.week,
+             no_spk: record.noSpk,
+             asuransi: record.asuransi,
+             jasa_nett: record.jasaNett,
+             part_material_nett: record.partMaterialNett,
+             expenses_bahan: record.expensesBahan,
+             hpp_part_material: record.hppPartMaterial,
+             spkl: record.spkl,
+             jumlah_panel: record.jumlahPanel,
+             wilayah: record.wilayah,
+           });
         });
         await batchInsert.commit();
       }

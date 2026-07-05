@@ -11,7 +11,6 @@ import AnalysisPanel from "../components/AnalysisPanel";
 import UploadManager from "../components/UploadManager";
 import SettingsPanel from "../components/SettingsPanel";
 import { Grid, BrainCircuit, UploadCloud, RefreshCw, BarChart4, Mail, LogOut, Settings, Calendar } from "lucide-react";
-import { motion } from "framer-motion";
 import { useAuth } from "../context/AuthContext";
 import { collection, getDocs, writeBatch, doc } from "firebase/firestore";
 import { db } from "../lib/firebaseConfig.js";
@@ -34,7 +33,24 @@ export default function System() {
     setErrorHeader("");
     try {
       const snap = await getDocs(collection(db, "body_repair_records"));
-      const data = snap.docs.map(docSnap => docSnap.data() as BodyRepairRecord);
+      // Normalize data: handle both camelCase (frontend writes) and snake_case (server writes)
+      const data = snap.docs.map(docSnap => {
+        const raw = docSnap.data();
+        return {
+          id: raw.id || docSnap.id,
+          tanggal: raw.tanggal,
+          week: Number(raw.week),
+          noSpk: raw.noSpk || raw.no_spk || '',
+          asuransi: raw.asuransi || '',
+          jasaNett: Number(raw.jasaNett ?? raw.jasa_nett ?? 0),
+          partMaterialNett: Number(raw.partMaterialNett ?? raw.part_material_nett ?? 0),
+          expensesBahan: Number(raw.expensesBahan ?? raw.expenses_bahan ?? 0),
+          hppPartMaterial: Number(raw.hppPartMaterial ?? raw.hpp_part_material ?? 0),
+          spkl: Number(raw.spkl ?? 0),
+          jumlahPanel: Number(raw.jumlahPanel ?? raw.jumlah_panel ?? 1),
+          wilayah: raw.wilayah || '',
+        } as BodyRepairRecord;
+      });
       // Sort desc by tanggal
       data.sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
       setRecords(data);
@@ -115,10 +131,24 @@ export default function System() {
       const chunkSize = 400;
       for (let i = 0; i < seedRecords.length; i += chunkSize) {
         const batchInsert = writeBatch(db);
-        const chunk = seedRecords.slice(i, i + chunkSize);
+         const chunk = seedRecords.slice(i, i + chunkSize);
         chunk.forEach(record => {
            const docRef = doc(db, "body_repair_records", record.id as string);
-           batchInsert.set(docRef, record);
+           // Write as snake_case to comply with Firestore Rules validation
+           batchInsert.set(docRef, {
+             id: record.id,
+             tanggal: record.tanggal,
+             week: record.week,
+             no_spk: record.noSpk,
+             asuransi: record.asuransi,
+             jasa_nett: record.jasaNett,
+             part_material_nett: record.partMaterialNett,
+             expenses_bahan: record.expensesBahan,
+             hpp_part_material: record.hppPartMaterial,
+             spkl: record.spkl,
+             jumlah_panel: record.jumlahPanel,
+             wilayah: record.wilayah,
+           });
         });
         await batchInsert.commit();
       }
@@ -223,7 +253,7 @@ export default function System() {
       .map(([name, panels]) => ({
         name,
         panels,
-        share: totalPanels > 0 ? (panels / totalPanels) * 105 : 0
+        share: totalPanels > 0 ? (panels / totalPanels) * 100 : 0
       }))
       .sort((a, b) => b.panels - a.panels);
   }, [records, selectedYear, selectedMonth, activeWeek]);

@@ -5,7 +5,7 @@
 
 import express from "express";
 import path from "path";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs";
 import { initializeApp } from "firebase/app";
@@ -374,13 +374,17 @@ app.post("/api/records/bulk", async (req, res) => {
       existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
       await batchClear.commit().catch(e => logFirebaseError("Clear database", e));
 
-      // Bulk insert
-      const batchInsert = writeBatch(firebaseDb);
-      validated.forEach(record => {
-         const docRef = doc(firebaseDb, "body_repair_records", record.id);
-         batchInsert.set(docRef, toDb(record));
-      });
-      await batchInsert.commit();
+      // Bulk insert with chunking (Firestore max 500 ops per batch)
+      const chunkSize = 400;
+      for (let i = 0; i < validated.length; i += chunkSize) {
+        const batchInsert = writeBatch(firebaseDb);
+        const chunk = validated.slice(i, i + chunkSize);
+        chunk.forEach(record => {
+           const docRef = doc(firebaseDb, "body_repair_records", record.id);
+           batchInsert.set(docRef, toDb(record));
+        });
+        await batchInsert.commit();
+      }
 
       recordsDatabase = validated;
       return res.json({ 
@@ -407,13 +411,17 @@ app.post("/api/records/reset", async (req, res) => {
       existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
       await batchClear.commit().catch(e => logFirebaseError("Clear database", e));
 
-      // Insert new seed rows in chunks
-      const batchInsert = writeBatch(firebaseDb);
-      seeds.forEach(record => {
-         const docRef = doc(firebaseDb, "body_repair_records", record.id);
-         batchInsert.set(docRef, toDb(record));
-      });
-      await batchInsert.commit();
+      // Insert new seed rows with chunking (Firestore max 500 ops per batch)
+      const chunkSize = 400;
+      for (let i = 0; i < seeds.length; i += chunkSize) {
+        const batchInsert = writeBatch(firebaseDb);
+        const chunk = seeds.slice(i, i + chunkSize);
+        chunk.forEach(record => {
+           const docRef = doc(firebaseDb, "body_repair_records", record.id);
+           batchInsert.set(docRef, toDb(record));
+        });
+        await batchInsert.commit();
+      }
 
       recordsDatabase = seeds;
       return res.json({ message: "Database reset to professional seed data in Firebase & memory", recordCount: seeds.length, records: seeds });
@@ -444,61 +452,25 @@ app.post("/api/records/clear", async (req, res) => {
 });
 
 
-// Settings App Config State
-let appSettings = {
-  mechanicsCount: 15,
-  sprayboothsCount: 4,
-  holidays: [] as string[]
-};
+// NOTE: Duplicate route block and duplicate appSettings variable removed.
+// All settings state is consolidated into `appSettingsCache` (line ~217).
+// The GET/POST /api/settings handlers at lines ~272-303 are the single source of truth.
 
 // Load settings from Firestore on startup if possible
 async function loadSettingsFromDb() {
   if (firebaseDb) {
     try {
-      const { getDoc, doc } = await import("firebase/firestore");
+      const { getDoc } = await import("firebase/firestore");
       const settingsDoc = await getDoc(doc(firebaseDb, "system_config", "settings"));
       if (settingsDoc.exists()) {
-        appSettings = { ...appSettings, ...settingsDoc.data() };
+        appSettingsCache = { ...appSettingsCache, ...settingsDoc.data() };
       }
     } catch (e) {
       console.error("Failed to load settings from DB:", e);
     }
   }
 }
-loadSettingsFromDb();
-
-app.get("/api/settings", async (req, res) => {
-  if (firebaseDb) {
-    try {
-      const { getDoc, doc } = await import("firebase/firestore");
-      const settingsDoc = await getDoc(doc(firebaseDb, "system_config", "settings"));
-      if (settingsDoc.exists()) {
-        appSettings = { ...appSettings, ...settingsDoc.data() };
-      }
-    } catch (e) {
-      console.error("Failed to fetch settings from DB:", e);
-    }
-  }
-  res.json(appSettings);
-});
-
-app.post("/api/settings", async (req, res) => {
-  const { mechanicsCount, sprayboothsCount, holidays } = req.body;
-  if (mechanicsCount !== undefined) appSettings.mechanicsCount = Number(mechanicsCount);
-  if (sprayboothsCount !== undefined) appSettings.sprayboothsCount = Number(sprayboothsCount);
-  if (Array.isArray(holidays)) appSettings.holidays = holidays;
-  
-  if (firebaseDb) {
-    try {
-      const { setDoc, doc } = await import("firebase/firestore");
-      await setDoc(doc(firebaseDb, "system_config", "settings"), appSettings);
-    } catch (e) {
-      console.error("Failed to save settings to DB:", e);
-    }
-  }
-
-  res.json({ message: "Settings updated", settings: appSettings });
-});
+loadSettingsFromDb().catch(e => console.error("Startup settings load failed:", e));
 
 // Semantic Heuristic Helper for Column Mapping fallback when AI is unavailable/fails
 function fallbackMapper(sampleData: any[]): any {
@@ -897,7 +869,7 @@ app.post("/api/analyze", async (req, res) => {
           3. Tiga Rencana Aksi Konkrit berdasar realitas bengkel body repair Indonesia (misal: pengerjaan panel, asuransi, estimasi).
           
           Sebagai referensi tambahan:
-          Bengkel saat ini memiliki kapasitas ${appSettings.mechanicsCount} mekanik aktif dan ${appSettings.sprayboothsCount} oven/spraybooth. Jika beban pekerjaan terlihat tinggi tetapi kapasitas terbatas, sarankan solusi optimasi kapasitas (bottleneck).
+          Bengkel saat ini memiliki kapasitas ${appSettingsCache.mechanicsCount} mekanik aktif dan ${appSettingsCache.sprayboothsCount} oven/spraybooth. Jika beban pekerjaan terlihat tinggi tetapi kapasitas terbatas, sarankan solusi optimasi kapasitas (bottleneck).
 
           Format output: kembalikan JSON dengan format persis di bawah ini demi keamanan parsing:
           {
