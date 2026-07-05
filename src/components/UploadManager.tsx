@@ -1,73 +1,74 @@
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
-import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Download, Database } from "lucide-react";
-import { BodyRepairRecord } from "../types";
-import { collection, writeBatch, doc, getDocs } from "firebase/firestore";
+import { Upload, File, RefreshCw, CheckCircle2, AlertTriangle, Play, Database, Calendar, PlusCircle, BrainCircuit } from "lucide-react";
+import { collection, doc, setDoc, writeBatch } from "firebase/firestore";
 import { db } from "../lib/firebaseConfig";
 
 interface UploadManagerProps {
-  onDataLoaded: (records: BodyRepairRecord[], message: string) => void;
-  onReset: () => Promise<void>;
+  onDatabaseChanged: () => Promise<void>;
   currentCount: number;
 }
 
-export default function UploadManager({ onDataLoaded, onReset, currentCount }: UploadManagerProps) {
+export default function UploadManager({ onDatabaseChanged, currentCount }: UploadManagerProps) {
+  // Manual Input States
+  const [manualWeek, setManualWeek] = useState<number>(1);
+  const [manualDate, setManualDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [manualJasa, setManualJasa] = useState<number>(0);
+  const [manualPart, setManualPart] = useState<number>(0);
+  const [manualExpenses, setManualExpenses] = useState<number>(0);
+  const [manualHpp, setManualHpp] = useState<number>(0);
+  const [manualSpkl, setManualSpkl] = useState<number>(0);
+  const [manualPanel, setManualPanel] = useState<number>(0);
+  const [isSavingManual, setIsSavingManual] = useState(false);
+  const [manualMsg, setManualMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // AI Upload States
   const [fileData, setFileData] = useState<any[] | null>(null);
   const [fileName, setFileName] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
-  const [dbStatus, setDbStatus] = useState<{
-    connected: boolean;
-    errorType: string | null;
-    message: string;
-    details?: any;
-  } | null>(null);
+  const [isProcessingAI, setIsProcessingAI] = useState(false);
+  const [aiMsg, setAiMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  React.useEffect(() => {
-    // Simple check to ensure Firebase is reachable
-    const checkStatus = async () => {
-      try {
-        await getDocs(collection(db, "body_repair_records"));
-        setDbStatus({
-          connected: true,
-          errorType: null,
-          message: "Koneksi live Firebase sinkron dan aktif!"
-        });
-      } catch (e: any) {
-        setDbStatus({
-          connected: false,
-          errorType: "AUTH_REQUIRED",
-          message: e.message || "Tabel database membutuhkan hak akses. Memory Sandbox fallback aktif."
-        });
-      }
-    };
-    checkStatus();
-  }, [currentCount]);
+  const handleManualSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingManual(true);
+    setManualMsg(null);
+    try {
+      const id = `FIN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const docRef = doc(db, "body_repair_records", id);
 
-  const downloadGuide = () => {
-    const wb = XLSX.utils.book_new();
-    const columns = [
-      "Tanggal (YYYY-MM-DD)", "NoSPK", "Asuransi", "JasaNett", "PartMaterialNett", 
-      "ExpensesBahan", "HPPPartMaterial", "SPKL", "JumlahPanel", "Wilayah"
-    ];
-    
-    // Create 5 sheets representing 5 weeks
-    for (let w = 1; w <= 5; ++w) {
-      const ws = XLSX.utils.aoa_to_sheet([columns]);
-      XLSX.utils.book_append_sheet(wb, ws, `Minggu ${w}`);
+      await setDoc(docRef, {
+        id,
+        tanggal: manualDate,
+        week: manualWeek,
+        no_spk: "MANUAL-FINANCIAL",
+        asuransi: "",
+        jasa_nett: manualJasa,
+        part_material_nett: manualPart,
+        expenses_bahan: manualExpenses,
+        hpp_part_material: manualHpp,
+        spkl: manualSpkl,
+        jumlah_panel: manualPanel,
+        wilayah: ""
+      });
+
+      await onDatabaseChanged();
+      setManualMsg({ type: "success", text: "Data keuangan agregat berhasil disimpan!" });
+
+      // Reset numerical fields
+      setManualJasa(0); setManualPart(0); setManualExpenses(0); setManualHpp(0); setManualSpkl(0); setManualPanel(0);
+    } catch (err: any) {
+      console.error(err);
+      setManualMsg({ type: "error", text: `Gagal menyimpan: ${err.message}` });
+    } finally {
+      setIsSavingManual(false);
     }
-
-    XLSX.writeFile(wb, "Data_Master_Guide_Bengkel.xlsx");
-    setSuccessMsg("Excel Guide berhasil diunduh. Silakan isi data berdasarkan template per minggu lalu unggah kembali.");
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setErrorMsg("");
-    setSuccessMsg("");
+    setAiMsg(null);
     setFileData(null);
     setFileName(file.name);
 
@@ -76,268 +77,224 @@ export default function UploadManager({ onDataLoaded, onReset, currentCount }: U
       try {
         const bser = evt.target?.result;
         const workbook = XLSX.read(bser, { type: "binary" });
-        
-        let allData: any[] = [];
-        
-        // Baca semua sheet
-        workbook.SheetNames.forEach((sheetName) => {
-          // Hanya proses sheet yang sekiranya bernama "Minggu X"
-          if (sheetName.toLowerCase().includes("minggu")) {
-            const weekNumberMatch = sheetName.match(/\d+/);
-            const weekNumber = weekNumberMatch ? parseInt(weekNumberMatch[0], 10) : 1;
-            
-            const worksheet = workbook.Sheets[sheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-            
-            // Tambahkan kolom minggu dan gabungkan array
-            const enrichedData = jsonData.map((row: any) => ({ ...row, _week: weekNumber }));
-            allData = allData.concat(enrichedData);
-          }
-        });
-        
-        if (allData.length === 0) {
-          // Fallback if sheets are not named 'Minggu'
-          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          allData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-          allData = allData.map((row: any) => ({ ...row, _week: 1 }));
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+        if (jsonData.length === 0) {
+          throw new Error("File Excel kosong.");
         }
 
-        if (allData.length === 0) {
-          throw new Error("File Excel kosong atau format tidak didukung.");
-        }
-
-        setFileData(allData);
-        setSuccessMsg(`Berhasil membaca file ${file.name} (${allData.length} baris data ditemukan). Silakan Proses Sinkronisasi Data.`);
+        setFileData(jsonData);
+        setAiMsg({ type: "success", text: `File terbaca (${jsonData.length} baris). Siap dikirim ke AI Backend.` });
       } catch (err: any) {
-        setErrorMsg(`Gagal memuat file: ${err.message || err}`);
+        setAiMsg({ type: "error", text: `Gagal memuat file: ${err.message}` });
       }
     };
     reader.readAsBinaryString(file);
   };
 
-  const processData = async () => {
+  const processAIExtraction = async () => {
     if (!fileData || fileData.length === 0) return;
-    
-    setIsProcessing(true);
-    setErrorMsg("");
-    setSuccessMsg("Mengekstrak data dari berbagai lembar kerja Mingguan...");
+    setIsProcessingAI(true);
+    setAiMsg({ type: "success", text: "Mengirim data ke AI Backend untuk di-screening..." });
 
     try {
-      const preparedRecords: Partial<BodyRepairRecord>[] = fileData.map((row) => {
-        // Find matching keys dynamically since users might tweak the column names slightly
-        const getVal = (possibleKeys: string[], defaultValue: any) => {
-          for (const key of possibleKeys) {
-            const foundKey = Object.keys(row).find(k => k.toLowerCase().replace(/[^a-z]/g, '') === key.toLowerCase().replace(/[^a-z]/g, ''));
-            if (foundKey && row[foundKey] !== "") return row[foundKey];
-          }
-          return defaultValue;
-        };
-
-        const rawDate = getVal(["Tanggal", "Date", "TanggalYYYYMMDD"], new Date().toISOString().split("T")[0]);
-        let dateStr = String(rawDate);
-        if (typeof rawDate === "number") {
-          const dt = XLSX.SSF.parse_date_code(rawDate);
-          if (dt) {
-            dateStr = `${dt.y}-${String(dt.m).padStart(2, "0")}-${String(dt.d).padStart(2, "0")}`;
-          }
-        }
-
-        const safeNumber = (val: any) => {
-           if (typeof val === "number") return val;
-           if (typeof val === "string") return Number(val.replace(/[^0-9.-]+/g,"")) || 0;
-           return 0;
-        }
-
-        const weekNum = row._week || 1;
-
-        return {
-          id: `INV-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-          tanggal: dateStr,
-          noSpk: String(getVal(["NoSPK", "SPK"], `SPK-GUIDE-${Math.floor(Math.random() * 10000)}`)),
-          asuransi: String(getVal(["Asuransi"], "Personal")),
-          jasaNett: safeNumber(getVal(["JasaNett", "Jasa"], 0)),
-          partMaterialNett: safeNumber(getVal(["PartMaterialNett", "PartMaterial"], 0)),
-          expensesBahan: safeNumber(getVal(["ExpensesBahan", "Expenses"], 0)),
-          hppPartMaterial: safeNumber(getVal(["HPPPartMaterial", "HPP"], 0)),
-          spkl: safeNumber(getVal(["SPKL"], 0)),
-          jumlahPanel: Math.max(1, safeNumber(getVal(["JumlahPanel", "Panel"], 1))),
-          wilayah: String(getVal(["Wilayah", "Area"], "Tidak Diketahui")),
-          week: weekNum,
-        };
+      const res = await fetch("/api/process-excel-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawRows: fileData })
       });
 
-      // Saving to Client Side Firebase
-      const existingSnap = await getDocs(collection(db, "body_repair_records"));
-      const batchClear = writeBatch(db);
-      existingSnap.docs.forEach((docSnap) => batchClear.delete(docSnap.ref));
-      await batchClear.commit().catch(e => console.warn("Clear database failed", e));
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Server error during AI screening");
+      }
 
-      // Batch insert logic using chunking
+      const aiMappedData = await res.json();
+
+      setAiMsg({ type: "success", text: "AI Selesai! Menyimpan hasil pemetaan ke database..." });
+
+      const preparedRecords = aiMappedData.map((row: any, index: number) => ({
+        id: `MAP-${Date.now()}-${index}`,
+        tanggal: manualDate,
+        week: manualWeek,
+        no_spk: "AI-MAPPING-RECORD",
+        asuransi: row.asuransi || "Personal",
+        jasa_nett: 0,
+        part_material_nett: 0,
+        expenses_bahan: 0,
+        hpp_part_material: 0,
+        spkl: 0,
+        jumlah_panel: 0, // 0 so it doesn't inflate total panel count!
+        wilayah: row.wilayah || "Tidak Diketahui"
+      }));
+
       const chunkSize = 400;
       for (let i = 0; i < preparedRecords.length; i += chunkSize) {
         const batchInsert = writeBatch(db);
         const chunk = preparedRecords.slice(i, i + chunkSize);
-        chunk.forEach(record => {
-           const docRef = doc(db, "body_repair_records", record.id as string);
-           // Write as snake_case to comply with Firestore Rules validation
-           batchInsert.set(docRef, {
-             id: record.id,
-             tanggal: record.tanggal,
-             week: record.week,
-             no_spk: record.noSpk,
-             asuransi: record.asuransi,
-             jasa_nett: record.jasaNett,
-             part_material_nett: record.partMaterialNett,
-             expenses_bahan: record.expensesBahan,
-             hpp_part_material: record.hppPartMaterial,
-             spkl: record.spkl,
-             jumlah_panel: record.jumlahPanel,
-             wilayah: record.wilayah,
-           });
+        chunk.forEach((record: any) => {
+          const docRef = doc(db, "body_repair_records", record.id);
+          batchInsert.set(docRef, record);
         });
         await batchInsert.commit();
       }
 
-      onDataLoaded(preparedRecords as BodyRepairRecord[], "Berhasil mengunggah data.");
-      setSuccessMsg(`Proses Selesai. ${preparedRecords.length} SPK berhasil diverifikasi dan disimpan dari berbagai minggu!`);
-      
-    } catch (error: any) {
-      console.error(error);
-      setErrorMsg(`Proses Gagal: ${error.message}`);
-      setSuccessMsg("");
+      await onDatabaseChanged();
+      setAiMsg({ type: "success", text: `Berhasil memetakan dan menyimpan ${preparedRecords.length} record wilayah & asuransi!` });
+      setFileData(null);
+      setFileName("");
+    } catch (err: any) {
+      console.error(err);
+      setAiMsg({ type: "error", text: `AI Screening Gagal: ${err.message}` });
     } finally {
-      setIsProcessing(false);
+      setIsProcessingAI(false);
     }
   };
 
   return (
     <div className="space-y-6">
       
-      <div className="bg-gradient-to-br from-[#0c0f16] to-[#040609] p-4 rounded-xl border border-indigo-500/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-gradient-to-br from-[#0c0f16] to-[#040609] p-4 rounded-xl border border-indigo-500/10 flex flex-col md:flex-row justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="flex items-center justify-center p-1.5 rounded-lg bg-indigo-950/40 border border-indigo-500/20">
-              <Download className="w-5 h-5 text-indigo-400" />
+              <Database className="w-5 h-5 text-indigo-400" />
             </span>
-            <h3 className="text-sm font-semibold text-white font-sans">Sistem Unggah Manual & Excel Guide</h3>
+            <h3 className="text-sm font-semibold text-white font-sans">Sistem Input Hybrid</h3>
           </div>
           <p className="text-xs text-gray-400 leading-relaxed font-mono">
-            Sistem menggunakan format Excel baku yang dibagi per minggu untuk mencegah entri ganda. Unduh guide, isi data, dan unggah.
+            Isi agregat keuangan secara manual, dan unggah daftar SPK untuk dipetakan secara otomatis oleh AI.
           </p>
         </div>
-        <button 
-          onClick={downloadGuide}
-          className="shrink-0 px-4 py-2 border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 font-bold text-xs rounded-lg flex items-center gap-2 transition"
-        >
-          <Download className="w-4 h-4" /> Unduh Excel Guide
-        </button>
-      </div>
-
-      {(errorMsg || successMsg) && (
-        <div className={`p-4 rounded-xl border text-xs font-mono flex items-start gap-3 ${errorMsg ? "bg-red-950/40 border-red-500/30 text-red-300" : "bg-emerald-950/40 border-emerald-500/30 text-emerald-300"}`}>
-          {errorMsg ? <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> : <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />}
-          <div className="space-y-1 leading-relaxed">
-            <p className="font-bold">{errorMsg ? "SYSTEM FAILURE" : "SYSTEM SUCCESS"}</p>
-            <p>{errorMsg || successMsg}</p>
-          </div>
+        <div className="flex items-center px-4 py-2 bg-indigo-900/20 border border-indigo-500/30 rounded-lg text-indigo-300 font-mono text-xs">
+          Total Data di Sistem: {currentCount}
         </div>
-      )}
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         
-        {/* Dropzone Area */}
-        <div className="bg-[#111111] border border-[#222] p-6 rounded-xl relative flex flex-col items-center justify-center h-64 border-dashed border-2 hover:border-indigo-500/50 transition">
-          <Upload className="w-8 h-8 text-indigo-400 mb-4" />
-          <h4 className="text-sm font-bold text-white mb-2">Unggah File Excel yang Terisi</h4>
-          <p className="text-[10px] text-gray-500 mb-6 font-mono text-center max-w-xs block leading-relaxed">
-            Format harus sesuai dengan panduan. Pastikan tiap minggu berada di sheet terpisah untuk menghindari error.
-          </p>
-          <input
-            type="file"
-            accept=".xlsx, .xls, .csv"
-            onChange={handleFileUpload}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-          />
-          {fileName && (
-            <div className="mt-4 px-3 py-1.5 bg-indigo-900/40 border border-indigo-500/30 text-indigo-300 text-xs rounded-full flex items-center gap-2">
-              <File className="w-3.5 h-3.5" />
-              {fileName}
+        {/* MANUAL INPUT FORM */}
+        <div className="bg-[#111111] border border-[#222] p-6 rounded-xl space-y-6 relative">
+          <div className="flex items-center gap-2 border-b border-[#262626] pb-3">
+            <PlusCircle className="w-4 h-4 text-emerald-400" />
+            <h4 className="text-sm font-bold text-white">Input Total Keuangan Mingguan</h4>
+          </div>
+
+          {manualMsg && (
+            <div className={`p-3 rounded-lg text-xs font-mono border ${manualMsg.type === "success" ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-300" : "bg-red-950/40 border-red-500/30 text-red-300"}`}>
+              {manualMsg.text}
             </div>
           )}
-        </div>
 
-        <div className="bg-[#111111] border border-[#222] p-6 rounded-xl space-y-6 flex flex-col justify-between">
-          <div className="space-y-4">
-            <h4 className="text-sm font-bold text-white flex items-center gap-2">
-              <Database className="w-4 h-4 text-indigo-400" /> Alur Pemrosesan
-            </h4>
-            <div className="space-y-2">
-              <div className="flex items-center gap-3 p-3 rounded bg-[#1a1a1a] border border-[#262626]">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${fileData ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-[#262626] text-gray-500"}`}>1</div>
-                <span className={`text-xs ${fileData ? "text-emerald-400 font-bold" : "text-gray-400"}`}>Validasi format ({fileData?.length || 0} SPK terbaca)</span>
+          <form onSubmit={handleManualSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Tanggal Input</label>
+                <div className="relative">
+                  <Calendar className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
+                  <input type="date" required value={manualDate} onChange={e => setManualDate(e.target.value)} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg pl-9 pr-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+                </div>
               </div>
-              <div className="flex items-center gap-3 p-3 rounded bg-[#1a1a1a] border border-[#262626]">
-                <div className={`w-6 h-6 rounded-full border flex items-center justify-center text-xs font-bold ${isProcessing ? "bg-indigo-500/20 text-indigo-400 border-indigo-500/30 animate-pulse" : "bg-[#262626] border-[#262626] text-gray-500"}`}>2</div>
-                <span className={`text-xs ${isProcessing ? "text-indigo-400 font-bold" : "text-gray-400"}`}>Sinkronisasi ke Database Utama</span>
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Minggu Ke-</label>
+                <select required value={manualWeek} onChange={e => setManualWeek(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none">
+                  {[1,2,3,4,5].map(w => <option key={w} value={w}>Minggu {w}</option>)}
+                </select>
               </div>
             </div>
-          </div>
-          
-          <button
-            onClick={processData}
-            disabled={!fileData || isProcessing}
-            className={`w-full p-4 rounded-xl flex items-center justify-center gap-2 font-bold text-sm transition ${!fileData || isProcessing ? "bg-[#171717] border border-[#262626] text-gray-500 cursor-not-allowed" : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)]"}`}
-          >
-            {isProcessing ? (
-              <><RefreshCw className="w-5 h-5 animate-spin" /> Sedang Diproses...</>
-            ) : (
-              <><Play className="w-5 h-5" /> Mulai Sinkronisasi Data</>
-            )}
-          </button>
+
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Jasa Nett</label>
+              <input type="number" required value={manualJasa || ""} onChange={e => setManualJasa(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Part & Material Nett</label>
+              <input type="number" required value={manualPart || ""} onChange={e => setManualPart(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Expenses Bahan</label>
+              <input type="number" required value={manualExpenses || ""} onChange={e => setManualExpenses(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">HPP Part</label>
+                <input type="number" required value={manualHpp || ""} onChange={e => setManualHpp(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">SPKL</label>
+                <input type="number" required value={manualSpkl || ""} onChange={e => setManualSpkl(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] text-gray-400 font-bold tracking-widest uppercase">Jumlah Total Panel</label>
+              <input type="number" required value={manualPanel || ""} onChange={e => setManualPanel(Number(e.target.value))} className="w-full bg-[#1a1a1a] border border-[#262626] rounded-lg px-3 py-2 text-white text-xs focus:border-emerald-500 outline-none" />
+            </div>
+
+            <button type="submit" disabled={isSavingManual} className="w-full mt-4 py-3 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 disabled:opacity-50">
+              {isSavingManual ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+              {isSavingManual ? "Menyimpan..." : "Simpan Data Keuangan"}
+            </button>
+          </form>
         </div>
-      </div>
-      
-      {/* Current DB Snapshot Banner / Connection Status */}
-      <div className={`p-5 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-5 transition ${
-        dbStatus?.connected 
-          ? "bg-[#101410]/80 border-emerald-500/20" 
-          : dbStatus?.errorType === "TABLE_MISSING"
-          ? "bg-[#18110a]/80 border-amber-500/20"
-          : "bg-[#160c0c]/80 border-red-500/20"
-      }`}>
-        <div className="space-y-1.5 max-w-xl">
-          <h4 className="text-sm font-bold text-white flex items-center gap-2">
-            {dbStatus?.connected ? (
-              <><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Database Live Firebase Aktif</>
-            ) : dbStatus?.errorType === "TABLE_MISSING" ? (
-              <><AlertTriangle className="w-4 h-4 text-amber-400" /> Sinkronisasi Firebase Tertunda</>
-            ) : (
-              <><AlertTriangle className="w-4 h-4 text-red-400" /> Mode Memori Lokal Aktif</>
+
+        {/* AI UPLOAD ZONE */}
+        <div className="flex flex-col gap-6">
+          <div className="bg-[#111111] border border-[#222] p-6 rounded-xl flex-1 flex flex-col justify-center relative border-dashed border-2 hover:border-indigo-500/50 transition">
+            <div className="absolute top-4 left-4 flex items-center gap-2">
+               <BrainCircuit className="w-4 h-4 text-indigo-400" />
+               <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Pemetaan Wilayah & Asuransi</h4>
+            </div>
+
+            <div className="flex flex-col items-center text-center mt-6">
+              <Upload className="w-8 h-8 text-indigo-400 mb-4" />
+              <h4 className="text-sm font-bold text-white mb-2">Unggah Excel SPK (Nopol & Asuransi)</h4>
+              <p className="text-[10px] text-gray-500 mb-6 font-mono max-w-[240px] leading-relaxed">
+                AI akan mencari kolom Alamat, Nopol, dan Pelanggan untuk memetakan Wilayah dan Asuransi secara pintar.
+              </p>
+              
+              <input
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleFileUpload}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              
+              {fileName && (
+                <div className="mt-2 px-3 py-1.5 bg-indigo-900/40 border border-indigo-500/30 text-indigo-300 text-xs rounded-full flex items-center gap-2">
+                  <File className="w-3.5 h-3.5" />
+                  {fileName}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-[#111111] border border-[#222] p-6 rounded-xl space-y-4">
+            {aiMsg && (
+              <div className={`p-3 rounded-lg text-xs font-mono border flex items-start gap-2 ${aiMsg.type === "success" ? "bg-indigo-950/40 border-indigo-500/30 text-indigo-300" : "bg-red-950/40 border-red-500/30 text-red-300"}`}>
+                {aiMsg.type === "success" ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                <span>{aiMsg.text}</span>
+              </div>
             )}
-          </h4>
-          <p className="text-[10px] leading-relaxed text-gray-400 font-mono">
-            {dbStatus?.connected
-              ? "Sistem sinkronisasi dua arah dengan Firebase Cloud Firestore aktif. Semua data tersimpan aman secara durable."
-              : dbStatus?.errorType === "TABLE_MISSING"
-              ? "Tabel database atau Firebase Rules belum terdeteksi/aktif. Sementara, data akan disimpan di memori lokal secara otomatis."
-              : "Firebase cloud sedang offline atau membutuhkan hak akses. Dashboard saat ini otomatis berjalan menggunakan penyimpanan memori terisolasi (Memory Sandbox)."}
-          </p>
+            
+            <button
+              onClick={processAIExtraction}
+              disabled={!fileData || isProcessingAI}
+              className={`w-full p-4 rounded-xl flex items-center justify-center gap-2 font-bold text-sm transition ${!fileData || isProcessingAI ? "bg-[#171717] border border-[#262626] text-gray-500 cursor-not-allowed" : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)]"}`}
+            >
+              {isProcessingAI ? (
+                <><RefreshCw className="w-5 h-5 animate-spin" /> AI Sedang Menganalisis...</>
+              ) : (
+                <><Play className="w-5 h-5" /> Proses Pemetaan dengan AI</>
+              )}
+            </button>
+          </div>
         </div>
         
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="px-3 py-1.5 rounded bg-[#111111]/90 border border-[#222] flex items-center gap-2">
-            <span className="text-[10px] text-gray-500 font-mono">Records Terbaca:</span>
-            <span className="text-xs font-bold text-indigo-400 font-mono">{currentCount} SPK</span>
-          </div>
-          
-          <button
-            onClick={onReset}
-            type="button"
-            className="px-3 py-1.5 rounded bg-amber-950/20 border border-amber-500/20 hover:bg-amber-950/40 text-amber-400 transition text-[11px] font-bold flex items-center gap-1.5"
-          >
-            <RefreshCw className="w-3.5 h-3.5" /> Muat Ulang Demo Seed
-          </button>
-        </div>
       </div>
     </div>
   );

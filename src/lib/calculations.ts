@@ -56,7 +56,10 @@ export function summarizeRecords(filtered: BodyRepairRecord[]): MetricSummary {
 
     if (r.asuransi) insuranceSet.add(r.asuransi);
     if (r.wilayah) {
-      regionTable[r.wilayah] = (regionTable[r.wilayah] || 0) + r.jumlahPanel;
+      // For AI mapping records (hybrid system), jumlahPanel is intentionally 0 to not inflate total panels.
+      // We treat them as 1 unit for the region distribution chart.
+      const increment = r.jumlahPanel === 0 && r.id.startsWith("MAP-") ? 1 : r.jumlahPanel;
+      regionTable[r.wilayah] = (regionTable[r.wilayah] || 0) + increment;
     }
   }
 

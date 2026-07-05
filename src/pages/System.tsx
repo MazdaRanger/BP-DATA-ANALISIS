@@ -468,8 +468,7 @@ export default function System() {
 
             {activeTab === "upload" && (
               <UploadManager
-                onDataLoaded={handleDataLoaded}
-                onReset={handleResetToSeed}
+                onDatabaseChanged={fetchRecords}
                 currentCount={records.length}
               />
             )}

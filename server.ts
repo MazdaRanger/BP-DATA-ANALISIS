@@ -214,6 +214,7 @@ function generateSeedData(): BodyRepairRecord[] {
 recordsDatabase = [];
 
 // API REST 
+let appSettingsCache: any = { mechanicsCount: 15, sprayboothsCount: 4, holidays: [] };
 app.get("/api/database-status", async (req, res) => {
   if (!firebaseDb) {
     return res.json({
@@ -287,7 +288,7 @@ app.post("/api/records/bulk", async (req, res) => {
     for (let day = 1; day <= dateObj.getDate(); day++) {
       const d = new Date(year, month, day);
       const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      if (d.getDay() !== 0 && !appSettings.holidays.includes(dateStr)) {
+      if (d.getDay() !== 0 && !appSettingsCache.holidays.includes(dateStr)) {
         workingDaysCount++;
       }
     }
@@ -561,6 +562,70 @@ app.post("/api/ai-mapper", async (req, res) => {
     console.warn("AI Mapper Failed. Falling back to smart semantic heuristic column mapper due to error:", error.message || error);
     const mappingConfig = fallbackMapper(sampleData);
     res.json(mappingConfig);
+  }
+});
+
+// AI SCREENING FOR EXCEL UPLOAD
+app.post("/api/process-excel-ai", async (req, res) => {
+  try {
+    const { rawRows } = req.body;
+    if (!rawRows || !Array.isArray(rawRows)) {
+      return res.status(400).json({ error: "Invalid data format" });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      // Fallback if no API key
+      const fallbackData = rawRows.map((_: any) => ({
+        asuransi: "Personal",
+        wilayah: "Tidak Diketahui (No API Key)"
+      }));
+      return res.json(fallbackData);
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const modelStr = "gemini-2.5-flash"; 
+
+    const prompt = `Anda adalah sistem data analyst cerdas untuk bengkel Body Repair.
+Tugas Anda adalah menstandarisasi/membersihkan (screening) data dari tabel Excel ke dalam struktur JSON baku.
+
+Untuk setiap baris data yang Anda terima, tentukan "wilayah" dan "asuransi" dengan aturan (SOP) berikut:
+
+1. WILAYAH: 
+   - Pertama, baca Alamat. Jika alamat cukup spesifik (misal menyebutkan kota/kabupaten, misal "Jakarta Selatan", "Bandung", "Bogor"), jadikan itu wilayahnya (misal: "DKI Jakarta", "Jawa Barat", dll).
+   - Kedua (Fallback), JIKA alamat kurang lengkap/tidak jelas/kosong, BACA KODE NOPOL (Nomor Polisi kendaraan). Misalnya plat awalan "B" = Jakarta, "F" = Bogor, "D" = Bandung. Ekstrak wilayah yang merepresentasikan kode plat tersebut.
+   - Jika keduanya tidak ada, isi "Tidak Diketahui".
+
+2. ASURANSI:
+   - Baca nama pelanggan / asuransi.
+   - Lakukan kroscek: Jika nama tersebut adalah Perusahaan Asuransi resmi (misal PT ASURANSI UMUM BCA, Asuransi Garda Oto, Adira, dll), bersihkan namanya menjadi nama asuransi standar (misal "Asuransi BCA").
+   - JIKA nama BUKAN perusahaan asuransi resmi (misal nama orang, atau PT non-asuransi), MAKA wajib kembalikan "Personal".
+
+Data mentah:
+${JSON.stringify(rawRows)}
+
+OUTPUT:
+Kembalikan HANYA format JSON Array murni (tanpa markdown blok). Urutannya HARUS sama persis dengan array input.
+Setiap objek WAJIB berisi properti:
+{
+  "asuransi": "nama asuransi / Personal",
+  "wilayah": "nama wilayah hasil deteksi"
+}
+`;
+
+    const gResult = await ai.models.generateContent({
+      model: modelStr,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.1
+      }
+    });
+
+    const parsed = JSON.parse(gResult.text || "[]");
+    res.json(parsed);
+  } catch (error: any) {
+    console.error("AI Screening Error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
